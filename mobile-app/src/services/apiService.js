@@ -148,10 +148,12 @@ const apiService = {
   // ── SCREEN 5: PASSPORT DATA UPDATE ───────────────────
   // PUT /api/bookings/:bookingId/passport
   // User ne verification screen pe data edit kiya → save karo
-  updatePassportData: async ({ bookingId, passportNumber, verifiedName }) => {
+  updatePassportData: async ({ bookingId, passportNumber, verifiedName, dateOfBirth, nationality }) => {
     const result = await api.put(`/bookings/${bookingId}/passport`, {
       passportNumber,
       verifiedName,
+      dateOfBirth,
+      nationality,
     });
     return result;
   },

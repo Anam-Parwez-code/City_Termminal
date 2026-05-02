@@ -37,7 +37,7 @@ app.add_middleware(
 )
 
 # ── MODEL CONFIG ──────────────────────────────────────────
-DEFAULT_MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "jais").lower()
+DEFAULT_MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "auto").lower()
 DEFAULT_JAIS_MODEL = os.getenv("JAIS_MODEL", "inceptionai/jais-13b-chat")
 DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
@@ -111,6 +111,7 @@ You are powered by JAIS LLM — UAE's official 13B bilingual AI model.
 You help passengers with:
 - Check-in process and required documents
 - Slot booking and pickup locations
+- Boarding QR, vehicle assignment, destination, and departure time
 - Vehicle tracking information
 - Flight information
 - General City Terminal queries
@@ -128,6 +129,7 @@ SYSTEM_PROMPT_AR = """أنت مساعد ذكاء اصطناعي لخدمة سي�
 تساعد المسافرين في:
 - عملية تسجيل الوصول والوثائق المطلوبة
 - حجز الفترات الزمنية ومواقع الاستلام
+- رمز QR، المركبة المخصصة، الوجهة، ووقت المغادرة
 - معلومات تتبع المركبات
 - معلومات الرحلات
 - استفسارات سيتي تيرمينال العامة
@@ -136,7 +138,8 @@ SYSTEM_PROMPT_AR = """أنت مساعد ذكاء اصطناعي لخدمة سي�
 - كن موجزاً ودافئاً ومحترفاً
 - اجعل إجاباتك قصيرة - 3-4 جمل كحد أقصى
 - إذا كنت لا تعرف شيئاً، قل ذلك بصدق
-- استجب دائماً بالعربية عندما يكتب المستخدم بالعربية"""
+- استجب دائماً بالعربية عندما يكتب المستخدم بالعربية
+- استخدم البيانات المباشرة عند توفرها للحجز، رمز QR، المركبة، الوجهة، المغادرة، وحالة الرحلة"""
 
 # ── REQUEST MODEL ─────────────────────────────────────────
 class ChatRequest(BaseModel):
@@ -155,6 +158,8 @@ class LiveStatusRequest(BaseModel):
 
 # ── LANGUAGE DETECT ───────────────────────────────────────
 def detect_language(text: str) -> str:
+    if re.search(r"[\u0600-\u06FF]", text or ""):
+        return "ar"
     try:
         lang = detect(text)
         return 'ar' if lang == 'ar' else 'en'
@@ -214,7 +219,7 @@ async def get_live_booking_context(booking_id: Optional[str], intents: List[str]
         slots = await supabase.fetch_many(
             "slots",
             {
-                "status": "eq.available",
+                "is_available": "eq.true",
                 "order": "slot_time.asc",
                 "limit": "5",
             },
@@ -241,9 +246,54 @@ def build_live_context_text(live: Dict[str, Any], lang: str) -> str:
     )
 
 
+def local_city_terminal_answer(message: str, booking_id: Optional[str], live: Dict[str, Any], lang: str) -> str:
+    booking = live.get("booking") or {}
+    vehicle = live.get("vehicle") or {}
+    slots = live.get("slots") or []
+    text = (message or "").lower()
+
+    if lang == "ar":
+        if vehicle:
+            return (
+                f"حالة الحجز {booking_id}: المركبة {vehicle.get('vehicle_number') or 'غير محددة'} "
+                f"وحالتها {vehicle.get('status') or 'غير متاحة'}. "
+                f"الموقع الحالي: {vehicle.get('current_location') or 'غير متاح'}."
+            )
+        if booking:
+            return (
+                f"تفاصيل الحجز {booking_id}: الرحلة {booking.get('flight_number') or 'غير متاحة'}، "
+                f"الوجهة {booking.get('destination') or 'غير متاحة'}، "
+                f"ووقت المغادرة {booking.get('departure_time') or 'غير متاح'}."
+            )
+        if slots:
+            first = slots[0]
+            return f"أقرب موعد متاح هو {first.get('slot_time')} في {first.get('location_name') or 'موقع الاستلام'}."
+        return "أستطيع مساعدتك في الحجز، رمز QR، حالة المركبة، الرحلة، ومواقع الاستلام. أرسل رقم الحجز للحصول على بيانات مباشرة."
+
+    if vehicle and any(k in text for k in ["vehicle", "car", "driver", "where", "location", "status"]):
+        return (
+            f"Booking {booking_id}: vehicle {vehicle.get('vehicle_number') or 'not assigned'} is "
+            f"{vehicle.get('status') or 'unknown'}. Current location: {vehicle.get('current_location') or 'not available'}."
+        )
+    if booking:
+        return (
+            f"Booking {booking_id}: flight {booking.get('flight_number') or 'unknown'}, "
+            f"destination {booking.get('destination') or 'unknown'}, departure {booking.get('departure_time') or 'unknown'}. "
+            f"Ask me about your QR, vehicle, slot, or flight status."
+        )
+    if slots:
+        first = slots[0]
+        return f"The next available slot is {first.get('slot_time')} at {first.get('location_name') or 'the pickup point'}."
+    return "I can help with booking QR, vehicle status, flight details, pickup location, and slots. Share a booking ID for live details."
+
+
+def has_model_credentials() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY") or os.getenv("JAIS_API_KEY"))
+
+
 def model_config_for_lang(lang: str) -> Dict[str, Any]:
     provider = DEFAULT_MODEL_PROVIDER
-    if provider == "jais":
+    if provider == "jais" and os.getenv("JAIS_API_KEY"):
         return {"provider": "jais", "model": DEFAULT_JAIS_MODEL}
     if provider == "openai":
         return {"provider": "openai", "model": DEFAULT_OPENAI_MODEL}
@@ -361,6 +411,13 @@ async def chat(req: ChatRequest):
     # ── STREAMING RESPONSE ────────────────────────────────
     async def generate():
         try:
+            if not has_model_credentials():
+                fallback = local_city_terminal_answer(req.message, req.bookingId, live_context, lang)
+                yield f"data: {json.dumps({'type': 'lang', 'lang': lang})}\n\n"
+                yield f"data: {json.dumps({'type': 'text', 'content': fallback}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+
             stream = completion_stream(messages, lang)
 
             # Language info pehle bhejo

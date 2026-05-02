@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -12,24 +12,35 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
+import adminService from '../services/adminService';
 
 const ChatSupportScreen = ({ navigation, route }) => {
-  const { t, i18n } = useTranslation();
+  const { i18n } = useTranslation();
   const isRTL = i18n.dir() === 'rtl';
-  const bookingId = route?.params?.bookingId ?? '';
-  console.log('Chat Screen Loaded with ID:', bookingId);
+  const [bookingId, setBookingId] = useState(route?.params?.bookingId ?? '');
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
       role: 'assistant',
-      text:
-        isRTL
-          ? 'مرحباً! يمكنني مساعدتك في حالة المركبة، الحقائب، الرحلة، والمواعيد المتاحة.'
-          : 'Hi! I can help with vehicle location, baggage status, flight status, and slot availability.',
+      text: isRTL
+        ? 'مرحبا! أستطيع مساعدتك في حالة المركبة، الرحلة، الحجز، رمز QR، وموقع الاستلام.'
+        : 'Hi! I can help with your vehicle, flight status, booking QR, pickup location, and slot availability.',
     },
   ]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!bookingId) {
+      adminService.getCurrentBookingId().then((savedBookingId) => {
+        if (mounted && savedBookingId) setBookingId(savedBookingId);
+      });
+    }
+    return () => {
+      mounted = false;
+    };
+  }, [bookingId]);
 
   const historyForApi = useMemo(
     () =>
@@ -75,14 +86,14 @@ const ChatSupportScreen = ({ navigation, route }) => {
             upsertAssistantDraft(assistantText);
           }
           if (event.type === 'error') {
-            assistantText = event.content || 'Something went wrong.';
+            assistantText = event.content || (isRTL ? 'حدث خطأ. حاول مرة أخرى.' : 'Something went wrong.');
             upsertAssistantDraft(assistantText);
           }
           if (event.type === 'done') {
             if (!assistantText.trim()) {
               assistantText = isRTL
-                ? 'الخدمة متاحة ولكن لم يصل رد واضح. حاول مرة أخرى.'
-                : 'Service is available but no response text arrived. Please try again.';
+                ? 'الخدمة متاحة، لكن لم يصل رد واضح. حاول مرة أخرى.'
+                : 'Service is available, but no response text arrived. Please try again.';
               upsertAssistantDraft(assistantText);
             }
             finalizeAssistantDraft();
@@ -91,22 +102,19 @@ const ChatSupportScreen = ({ navigation, route }) => {
       });
     } catch (_err) {
       let fallbackText = isRTL
-        ? 'حدث خطأ أثناء المحادثة. حاول مرة أخرى.'
-        : 'Chat failed. Please try again.';
+        ? 'تعذر الاتصال بالمساعد الآن. سأحاول عرض الحالة المباشرة من بيانات الحجز.'
+        : 'Chat connection failed. I will try to show live booking status instead.';
       try {
         if (bookingId) {
           const live = await apiService.getLiveTripStatus({ bookingId });
           const vehicle = live?.live?.vehicle;
-          const flight = live?.live?.flight;
-          const baggage = live?.live?.baggage;
-          if (isRTL) {
-            fallbackText = `تحديث فوري للحجز ${bookingId}: المركبة ${vehicle?.status || 'غير متاح'}، الرحلة ${flight?.status || 'غير متاح'}، الأمتعة ${baggage?.status || 'غير متاح'}.`;
-          } else {
-            fallbackText = `Live update for ${bookingId}: vehicle ${vehicle?.status || 'unknown'}, flight ${flight?.status || 'unknown'}, baggage ${baggage?.status || 'unknown'}.`;
-          }
+          const flight = live?.live?.flight || live?.live?.booking;
+          fallbackText = isRTL
+            ? `حالة الحجز ${bookingId}: المركبة ${vehicle?.status || 'غير متاحة'}، الموقع ${vehicle?.current_location || 'غير متاح'}، الرحلة ${flight?.status || 'غير متاحة'}.`
+            : `Booking ${bookingId}: vehicle ${vehicle?.status || 'unknown'}, location ${vehicle?.current_location || 'unknown'}, flight ${flight?.status || 'unknown'}.`;
         }
       } catch (_liveErr) {
-        // Keep default fallback text.
+        // Keep connection fallback.
       }
       upsertAssistantDraft(fallbackText);
       finalizeAssistantDraft();
@@ -124,37 +132,41 @@ const ChatSupportScreen = ({ navigation, route }) => {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
     >
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={styles.backArrow}>{isRTL ? '→' : '←'}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>{isRTL ? 'مساعدة ذكية' : 'AI Support'}</Text>
+        <View>
+          <Text style={styles.title}>{isRTL ? 'مساعدة ذكية' : 'AI Support'}</Text>
+          {!!bookingId && <Text style={styles.subtitle}>{bookingId}</Text>}
+        </View>
         <View style={{ width: 44 }} />
       </View>
 
-      <View style={styles.messagesContainer}>
-        <FlatList
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
-          style={styles.list}
-        />
-      </View>
+      <FlatList
+        data={messages}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={styles.listContent}
+        style={styles.list}
+        keyboardShouldPersistTaps="handled"
+      />
 
       <View style={styles.inputRow}>
         <TextInput
           style={[styles.input, isRTL && styles.textRight]}
-          placeholder={isRTL ? 'اكتب سؤالك...' : 'Ask about vehicle, baggage, flight, slots...'}
+          placeholder={isRTL ? 'اكتب سؤالك...' : 'Ask about vehicle, QR, flight, slots...'}
           placeholderTextColor="#94A3B8"
           value={input}
           onChangeText={setInput}
           editable={!isSending}
+          multiline
         />
         <TouchableOpacity style={styles.sendButton} onPress={sendMessage} disabled={isSending}>
-          {isSending ? <ActivityIndicator color="#FFF" /> : <Text style={styles.sendText}>Send</Text>}
+          {isSending ? <ActivityIndicator color="#FFF" /> : <Text style={styles.sendText}>{isRTL ? 'إرسال' : 'Send'}</Text>}
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -163,7 +175,6 @@ const ChatSupportScreen = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F0F10' },
-  messagesContainer: { flex: 1 },
   list: { flex: 1 },
   header: {
     flexDirection: 'row',
@@ -182,7 +193,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   backArrow: { color: '#FFF', fontSize: 20 },
-  title: { color: '#F8FAFC', fontSize: 19, fontWeight: '700' },
+  title: { color: '#F8FAFC', fontSize: 19, fontWeight: '700', textAlign: 'center' },
+  subtitle: { color: '#94A3B8', fontSize: 11, textAlign: 'center', marginTop: 2 },
   listContent: { paddingHorizontal: 16, paddingBottom: 14 },
   msgBubble: {
     borderRadius: 14,
@@ -196,7 +208,7 @@ const styles = StyleSheet.create({
   msgText: { color: '#F8FAFC', fontSize: 14, lineHeight: 20 },
   inputRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: 10,
     padding: 14,
     borderTopWidth: 1,
@@ -205,6 +217,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    maxHeight: 96,
     backgroundColor: '#1A1A1D',
     borderRadius: 12,
     borderWidth: 1,
@@ -217,7 +230,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#009A44',
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     minWidth: 68,
     alignItems: 'center',
   },
@@ -226,4 +239,3 @@ const styles = StyleSheet.create({
 });
 
 export default ChatSupportScreen;
-

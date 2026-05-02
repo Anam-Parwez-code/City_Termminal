@@ -38,6 +38,14 @@ button { cursor: pointer; background: #ef3340; border: none; font-weight: 700; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { border-bottom: 1px solid #2e3138; text-align: left; padding: 8px 6px; }
 th { color: #94a3b8; }
+.qr-cell {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #d1fae5;
+}
 
 .map-box {
   position: relative; height: 280px; border-radius: 10px; background: #101318;

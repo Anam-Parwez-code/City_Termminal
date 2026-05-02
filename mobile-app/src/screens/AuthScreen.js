@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
 import adminService from '../services/adminService';
 
 const AuthScreen = ({ navigation }) => {
@@ -21,7 +31,8 @@ const AuthScreen = ({ navigation }) => {
       } else {
         await adminService.login({ email: email.trim(), password: password.trim() });
       }
-      navigation.replace('BookingEntry');
+      const currentBookingId = await adminService.getCurrentBookingId();
+      navigation.replace(currentBookingId ? 'AdminDashboard' : 'BookingEntry');
     } catch (err) {
       Alert.alert('Auth Failed', err?.response?.data?.message || err.message || 'Please try again');
     } finally {
@@ -30,9 +41,18 @@ const AuthScreen = ({ navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.keyboardView}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+      <View style={styles.card}>
       <Text style={styles.title}>City Terminal</Text>
-      <Text style={styles.subtitle}>Login / Signup to continue</Text>
+      <Text style={styles.subtitle}>Login or signup to continue</Text>
 
       <View style={styles.switchRow}>
         <TouchableOpacity
@@ -83,12 +103,16 @@ const AuthScreen = ({ navigation }) => {
       >
         <Text style={styles.submitText}>{loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Login'}</Text>
       </TouchableOpacity>
-    </View>
+      </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F0F10', padding: 24, justifyContent: 'center' },
+  keyboardView: { flex: 1, backgroundColor: '#0F0F10' },
+  container: { flexGrow: 1, padding: 24, justifyContent: 'center' },
+  card: { backgroundColor: '#191A1E', borderWidth: 1, borderColor: '#2E3138', borderRadius: 18, padding: 18 },
   title: { color: '#F8FAFC', fontSize: 30, fontWeight: '800', marginBottom: 6 },
   subtitle: { color: '#CBD5E1', fontSize: 14, marginBottom: 22 },
   switchRow: { flexDirection: 'row', marginBottom: 16, backgroundColor: '#1A1A1D', borderRadius: 12, padding: 4 },

@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, TextInput, Image, ActivityIndicator,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
@@ -63,8 +64,20 @@ const VerificationScreen = ({ navigation, route }) => {
   // ── CONFIRM — SEEDHA SLOT BOOKING PE JAO ─────────────────
   // Passport update backend call NAHI karein
   // Sirf data carry karein aur aage jaao
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     setIsLoading(true);
+
+    try {
+      await apiService.updatePassportData({
+        bookingId,
+        passportNumber: passportNo.trim(),
+        verifiedName: name.trim(),
+        dateOfBirth: dob.trim(),
+        nationality: nationality.trim(),
+      });
+    } catch (_err) {
+      // Continue even if passport persistence is temporarily unavailable.
+    }
 
     // Chhota delay — loading dikhao — phir navigate
     setTimeout(() => {
@@ -113,7 +126,17 @@ const VerificationScreen = ({ navigation, route }) => {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <KeyboardAvoidingView
+      style={styles.keyboardView}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+    >
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={styles.contentContainer}
+    >
 
       {/* HEADER */}
       <View style={styles.header}>
@@ -200,11 +223,14 @@ const VerificationScreen = ({ navigation, route }) => {
       </View>
 
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  keyboardView: { flex: 1, backgroundColor: '#0F0F10' },
   container: { flex: 1, backgroundColor: '#0F0F10', paddingHorizontal: 24 },
+  contentContainer: { paddingBottom: 24 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 60, marginBottom: 24 },
   backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1A1A1D', alignItems: 'center', justifyContent: 'center', shadowColor: '#EF3340', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 3 },
   backArrow: { fontSize: 20, color: '#F8FAFC' },

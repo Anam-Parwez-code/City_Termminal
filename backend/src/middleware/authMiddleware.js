@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'city-terminal-secret-2026';
 
 const authenticate = (req, res, next) => {
   const authHeader = req.headers.authorization || '';

@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 
 const BASE_URL = 'http://192.168.245.224:5000/api';
 const TOKEN_KEY = 'city_terminal_admin_token';
+const CURRENT_BOOKING_KEY = 'city_terminal_current_booking_id';
 
 const adminApi = axios.create({
   baseURL: BASE_URL,
@@ -38,6 +39,16 @@ const adminService = {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
   },
 
+  async saveCurrentBookingId(bookingId) {
+    if (bookingId) {
+      await SecureStore.setItemAsync(CURRENT_BOOKING_KEY, String(bookingId));
+    }
+  },
+
+  async getCurrentBookingId() {
+    return SecureStore.getItemAsync(CURRENT_BOOKING_KEY);
+  },
+
   async isAuthenticated() {
     const token = await SecureStore.getItemAsync(TOKEN_KEY);
     return Boolean(token);
@@ -53,11 +64,13 @@ const adminService = {
     return res.data;
   },
 
-  async fetchPassengers() {
-    const res = await adminApi.get('/admin/operations/passengers', await withToken());
+  async fetchPassengers(q = '') {
+    const config = await withToken();
+    config.params = q ? { q } : {};
+    const res = await adminApi.get('/admin/operations/passengers', config);
     return res.data;
   },
 };
 
-export { TOKEN_KEY };
+export { TOKEN_KEY, CURRENT_BOOKING_KEY };
 export default adminService;

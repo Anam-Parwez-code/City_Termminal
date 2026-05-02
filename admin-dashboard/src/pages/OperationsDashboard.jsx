@@ -120,13 +120,19 @@ const OperationsDashboard = ({ auth, onLogout }) => {
         </div>
         <table>
           <thead>
-            <tr>
-              <th>Name</th>
-              <th>Flight</th>
-              <th>Booking ID</th>
-              <th>Slot Time</th>
-              <th>Status</th>
-            </tr>
+              <tr>
+                <th>Name</th>
+                <th>Flight</th>
+                <th>Booking ID</th>
+                <th>Boarding QR</th>
+                <th>Vehicle</th>
+                <th>Vehicle Status</th>
+                <th>Destination</th>
+                <th>Departure</th>
+                <th>Flight Status</th>
+                <th>Slot Time</th>
+                <th>Status</th>
+              </tr>
           </thead>
           <tbody>
             {passengers.slice(0, 50).map((p) => (
@@ -134,6 +140,12 @@ const OperationsDashboard = ({ auth, onLogout }) => {
                 <td>{p.name}</td>
                 <td>{p.flight}</td>
                 <td>{p.booking_id}</td>
+                <td className="qr-cell">{p.qr_code || p.booking_id}</td>
+                <td>{p.vehicle_number || '--'}</td>
+                <td>{p.vehicle_status || p.current_location || '--'}</td>
+                <td>{p.destination || '--'}</td>
+                <td>{p.departure_time || '--'}</td>
+                <td>{p.flight_status || '--'}</td>
                 <td>{p.slot_time ? new Date(p.slot_time).toLocaleString() : '--'}</td>
                 <td>{p.status}</td>
               </tr>

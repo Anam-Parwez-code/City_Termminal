@@ -1,12 +1,3 @@
-// ============================================================
-// FILE: backend/src/controllers/passportController.js
-// FINAL FIXED VERSION
-// ============================================================
-// BUGS FIXED:
-// Field name 'image' → 'imageBase64' fix kiya
-// Mobile app aur backend ka field name match kiya
-// ============================================================
-
 require('dotenv').config();
 const Tesseract = require('tesseract.js');
 const OpenAI = require('openai');
@@ -15,17 +6,28 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'dummy-key',
 });
 
-// ============================================================
-// MAIN FUNCTION
-// POST /api/passport/scan
-// ============================================================
+const emptyPassport = () => ({
+  name: null,
+  passportNumber: null,
+  dateOfBirth: null,
+  nationality: null,
+  expiryDate: null,
+  gender: null,
+  confidence: 0,
+});
+
+const normalizeBase64 = (imageBase64) => {
+  if (!imageBase64) return '';
+  if (imageBase64.startsWith('data:') && imageBase64.includes(',')) {
+    return imageBase64.split(',')[1];
+  }
+  return imageBase64;
+};
+
 const scanPassport = async (req, res) => {
   try {
-    // ── REQUEST DATA ─────────────────────────────────────
-    // FIXED: 'imageBase64' — mobile app yahi field bhejti hai
-    const { imageBase64, bookingId } = req.body;
+    const { imageBase64 } = req.body;
 
-    // ── VALIDATE ─────────────────────────────────────────
     if (!imageBase64) {
       return res.status(400).json({
         success: false,
@@ -33,222 +35,238 @@ const scanPassport = async (req, res) => {
       });
     }
 
-    // ── METHOD SELECT ─────────────────────────────────────
-    const method = process.env.PASSPORT_SCAN_METHOD || 'tesseract';
-    console.log(`📸 Passport scan method: ${method}`);
-
-    // ── SCAN ─────────────────────────────────────────────
+    const method = process.env.PASSPORT_SCAN_METHOD || 'auto';
     let extractedData;
 
-    if (method === 'openai') {
-      extractedData = await scanWithOpenAI(imageBase64);
-    } else if (method === 'tesseract') {
-      extractedData = await scanWithTesseract(imageBase64);
-    } else {
-      // default: mock — testing ke liye
-      extractedData = getMockData();
+    if ((method === 'openai' || method === 'auto') && process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'dummy-key') {
+      try {
+        extractedData = await scanWithOpenAI(imageBase64);
+      } catch (openAiError) {
+        console.warn('OpenAI passport scan failed, falling back to OCR:', openAiError.message);
+      }
     }
 
-    // ── RESPONSE ─────────────────────────────────────────
+    if (!hasRequiredPassportData(extractedData)) {
+      extractedData = await scanWithTesseract(imageBase64);
+    }
+
     return res.status(200).json({
       success: true,
-      data: extractedData,
-      method: method,
+      data: normalizePassportPayload(extractedData),
+      method,
     });
-
   } catch (error) {
-    console.error('❌ Passport scan error:', error.message);
+    console.error('Passport scan error:', error.message);
     return res.status(500).json({
       success: false,
-      message: 'Passport scanning failed. Please retake photo.',
+      message: 'Passport scanning failed. Please retake photo with the MRZ lines clearly visible.',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 };
 
-// ── TESSERACT ────────────────────────────────────────────
 const scanWithTesseract = async (imageBase64) => {
-  console.log('🔍 Tesseract OCR starting...');
-  const imageBuffer = Buffer.from(imageBase64, 'base64');
-  const { data: { text } } = await Tesseract.recognize(imageBuffer, 'eng', {
-    logger: (m) => {
-      if (m.status === 'recognizing text') {
-        const p = Math.round(m.progress * 100);
-        if (p % 25 === 0) console.log(`OCR: ${p}%`);
-      }
-    },
+  const imageBuffer = Buffer.from(normalizeBase64(imageBase64), 'base64');
+  const { data } = await Tesseract.recognize(imageBuffer, 'eng', {
+    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789< -/.,',
+    preserve_interword_spaces: '1',
   });
-  console.log('Raw OCR text:', text);
-  const mrzParsed = parseMRZ(text);
-  if (hasAnyPassportData(mrzParsed)) {
-    return mrzParsed;
-  }
-  return parseVisualText(text);
+
+  const rawText = data?.text || '';
+  console.log('Raw OCR text:', rawText);
+
+  const mrz = parseMRZ(rawText);
+  const visual = parseVisualText(rawText);
+
+  return {
+    ...visual,
+    ...Object.fromEntries(
+      Object.entries(mrz).filter(([, value]) => value !== null && value !== undefined && value !== '')
+    ),
+    confidence: hasRequiredPassportData(mrz) ? 0.9 : 0.55,
+  };
 };
 
-// ── OPENAI ───────────────────────────────────────────────
 const scanWithOpenAI = async (imageBase64) => {
-  console.log('🤖 OpenAI Vision starting...');
-  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === 'dummy-key') {
-    throw new Error('OPENAI_API_KEY not set in .env');
-  }
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 400,
+    model: process.env.PASSPORT_VISION_MODEL || 'gpt-4o',
+    temperature: 0,
+    max_tokens: 500,
     messages: [{
       role: 'user',
       content: [
         {
           type: 'text',
-          text: 'Extract passport data. Return ONLY JSON: {"name":"","passportNumber":"","dateOfBirth":"YYYY-MM-DD","nationality":"","expiryDate":"YYYY-MM-DD","gender":"M/F"}. Use null for unclear fields.',
+          text: [
+            'Extract passport data from the image.',
+            'Read both the visual inspection zone and the MRZ at the bottom.',
+            'Return ONLY strict JSON with keys:',
+            '{"name":null,"passportNumber":null,"dateOfBirth":null,"nationality":null,"expiryDate":null,"gender":null,"confidence":0}',
+            'Use YYYY-MM-DD for dates. Use null for unclear fields. Do not guess.',
+          ].join(' '),
         },
         {
           type: 'image_url',
           image_url: {
-            url: `data:image/jpeg;base64,${imageBase64}`,
+            url: `data:image/jpeg;base64,${normalizeBase64(imageBase64)}`,
             detail: 'high',
           },
         },
       ],
     }],
   });
-  const text = response.choices[0].message.content
-    .replace(/```json/g, '').replace(/```/g, '').trim();
-  return JSON.parse(text);
+
+  const text = response.choices[0].message.content || '{}';
+  const json = text.match(/\{[\s\S]*\}/)?.[0] || '{}';
+  return JSON.parse(json);
 };
 
-// ── MRZ PARSER ───────────────────────────────────────────
-const parseMRZ = (rawText) => {
-  try {
-    const lines = rawText
-      .split('\n')
-      .map(l => l.trim().replace(/\s+/g, ''))
-      .filter(l => l.length >= 30 && /^[A-Z0-9<]+$/.test(l));
+const repairMrzLine = (line) =>
+  String(line || '')
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[«‹＜]/g, '<')
+    .replace(/[^A-Z0-9<]/g, '');
 
-    console.log('MRZ lines:', lines);
+const mrzDate = (value, type = 'birth') => {
+  const s = String(value || '').replace(/[OQD]/g, '0').replace(/[IL]/g, '1');
+  if (!/^\d{6}$/.test(s)) return null;
 
-    if (lines.length >= 2) {
-      const line1 = lines[lines.length - 2];
-      const line2 = lines[lines.length - 1];
+  const yy = Number(s.slice(0, 2));
+  const mm = Number(s.slice(2, 4));
+  const dd = Number(s.slice(4, 6));
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
 
-      const namePart = line1.substring(5);
-      const doubleAngle = namePart.indexOf('<<');
-      let surname = '', givenName = '';
-
-      if (doubleAngle !== -1) {
-        surname = namePart.substring(0, doubleAngle).replace(/</g, ' ').trim();
-        givenName = namePart.substring(doubleAngle + 2).replace(/</g, ' ').trim();
-      } else {
-        surname = namePart.replace(/</g, ' ').trim();
-      }
-
-      const fullName = `${givenName} ${surname}`.trim();
-
-      const convertDate = (s) => {
-        if (!s || s.length !== 6) return null;
-        const yy = parseInt(s.substring(0, 2));
-        const mm = s.substring(2, 4);
-        const dd = s.substring(4, 6);
-        const yyyy = yy <= 30 ? `20${s.substring(0, 2)}` : `19${s.substring(0, 2)}`;
-        return `${yyyy}-${mm}-${dd}`;
-      };
-
-      const genderChar = line2.charAt(20);
-
-      return {
-        name: fullName || null,
-        passportNumber: line2.substring(0, 9).replace(/</g, '') || null,
-        dateOfBirth: convertDate(line2.substring(13, 19)),
-        nationality: line2.substring(10, 13).replace(/</g, '') || null,
-        expiryDate: convertDate(line2.substring(21, 27)),
-        gender: genderChar === 'M' ? 'M' : genderChar === 'F' ? 'F' : null,
-      };
-    }
-
-    console.log('⚠️ No MRZ found');
-    return { name: null, passportNumber: null, dateOfBirth: null, nationality: null, expiryDate: null, gender: null };
-
-  } catch (e) {
-    console.error('MRZ parse error:', e);
-    return { name: null, passportNumber: null, dateOfBirth: null, nationality: null, expiryDate: null, gender: null };
+  const currentYY = new Date().getFullYear() % 100;
+  let yyyy;
+  if (type === 'expiry') {
+    yyyy = yy < currentYY - 5 ? 2100 + yy : 2000 + yy;
+  } else {
+    yyyy = yy <= currentYY ? 2000 + yy : 1900 + yy;
   }
+
+  return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
 };
 
-const hasAnyPassportData = (data) => {
-  if (!data) return false;
-  return Boolean(data.name || data.passportNumber || data.dateOfBirth || data.nationality || data.expiryDate);
+const parseMRZ = (rawText) => {
+  const lines = String(rawText || '')
+    .split(/\r?\n/)
+    .map(repairMrzLine)
+    .filter((line) => line.length >= 28 && line.includes('<'));
+
+  const candidates = [];
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    const first = lines[i];
+    const second = lines[i + 1];
+    const looksLikeNameLine = first.includes('<<') && /[A-Z]{3,}/.test(first.replace(/</g, ''));
+    const looksLikeDataLine = /^[A-Z0-9<]{6,}/.test(second) && /\d{6}/.test(second);
+    if (((first.startsWith('P<') || first.startsWith('P')) || looksLikeNameLine) && second.length >= 28 && looksLikeDataLine) {
+      const normalizedFirst = first.startsWith('P') ? first : `P<${first}`;
+      candidates.push([normalizedFirst.padEnd(44, '<').slice(0, 44), second.padEnd(44, '<').slice(0, 44)]);
+    }
+  }
+
+  if (candidates.length === 0) return emptyPassport();
+
+  const [line1, line2] = candidates[candidates.length - 1];
+  const namePart = line1.slice(5);
+  const [surnameRaw = '', givenRaw = ''] = namePart.split('<<');
+  const surname = surnameRaw.replace(/</g, ' ').replace(/\s+/g, ' ').trim();
+  const givenName = givenRaw.replace(/</g, ' ').replace(/\s+/g, ' ').trim();
+  const fullName = `${givenName} ${surname}`.replace(/\s+/g, ' ').trim() || surname || null;
+  const genderChar = line2.charAt(20);
+
+  return {
+    name: titleCase(fullName),
+    passportNumber: line2.slice(0, 9).replace(/</g, '').replace(/[O]/g, '0') || null,
+    nationality: line2.slice(10, 13).replace(/</g, '') || line1.slice(2, 5).replace(/</g, '') || null,
+    dateOfBirth: mrzDate(line2.slice(13, 19), 'birth'),
+    expiryDate: mrzDate(line2.slice(21, 27), 'expiry'),
+    gender: genderChar === 'M' || genderChar === 'F' ? genderChar : null,
+    confidence: 0.9,
+  };
 };
 
-const toIsoDateFromDmy = (day, monthStr, year2) => {
+const titleCase = (value) => {
+  if (!value) return null;
+  return String(value)
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (char) => char.toUpperCase());
+};
+
+const parseDateToken = (value) => {
+  const text = String(value || '').toUpperCase();
   const monthMap = {
     JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
     JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12',
   };
-  const mm = monthMap[String(monthStr || '').toUpperCase()];
-  if (!mm) return null;
-  const yy = Number(year2);
-  const yyyy = Number.isNaN(yy) ? null : (yy <= 30 ? 2000 + yy : 1900 + yy);
-  if (!yyyy) return null;
-  return `${yyyy}-${mm}-${String(day).padStart(2, '0')}`;
+
+  let m = text.match(/\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*[\s/-]*(\d{2,4})\b/);
+  if (m) {
+    const yyyy = m[3].length === 4 ? Number(m[3]) : (Number(m[3]) <= 30 ? 2000 + Number(m[3]) : 1900 + Number(m[3]));
+    return `${yyyy}-${monthMap[m[2]]}-${String(m[1]).padStart(2, '0')}`;
+  }
+
+  m = text.match(/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+
+  m = text.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/);
+  if (m) {
+    const yyyy = m[3].length === 4 ? Number(m[3]) : (Number(m[3]) <= 30 ? 2000 + Number(m[3]) : 1900 + Number(m[3]));
+    return `${yyyy}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+  }
+
+  return null;
 };
 
 const parseVisualText = (rawText) => {
   const text = String(rawText || '').replace(/\r/g, '\n');
   const upper = text.toUpperCase();
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const dateMatches = [...upper.matchAll(/\b(?:\d{1,2}\s*(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*[\s/-]*\d{2,4}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b/g)];
+  const dates = dateMatches.map((match) => parseDateToken(match[0])).filter(Boolean);
+  const passportMatch = upper.match(/\b[A-Z]{1,2}[0-9]{6,8}\b/) || upper.match(/\b[0-9]{8,9}\b/);
+  const nationalityMatch = upper.match(/\b(INDIAN|INDIA|BRITISH|UNITED KINGDOM|AMERICAN|USA|PAKISTANI|PAKISTAN|PHILIPPINES|FILIPINO|EMIRATI|UAE|NEPALI|BANGLADESHI|SRI LANKAN|EGYPTIAN|JORDANIAN|SAUDI)\b/);
 
-  const passportMatch =
-    upper.match(/\b[A-Z][0-9]{7,8}\b/) ||
-    upper.match(/\b[0-9]{8,9}\b/);
-
-  const dobMatch = upper.match(/\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[\/\s-]*(\d{2})\b/);
-  const expiryMatch = upper.match(/\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[\/\s-]*(\d{2})\b/g);
-
-  const nationalityMatch =
-    upper.match(/\b(INDIAN|INDIA|UNITED KINGDOM|BRITISH|PHILIPPINES|FILIPINO|UAE|EMIRATI)\b/);
-
-  // Try to extract likely name line: uppercase words between passport heading and date line.
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   let guessedName = null;
   for (const line of lines) {
     const normalized = line.replace(/[^A-Za-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!normalized) continue;
-    if (normalized.length < 5 || normalized.length > 40) continue;
-    if (/passport|nationality|date|authority|republic|citizen/i.test(normalized)) continue;
+    if (normalized.length < 5 || normalized.length > 45) continue;
+    if (/passport|nationality|date|birth|expiry|authority|republic|surname|given|sex|place/i.test(normalized)) continue;
     const words = normalized.split(' ');
-    if (words.length >= 2 && words.every((w) => /^[A-Za-z]+$/.test(w))) {
-      guessedName = normalized;
+    if (words.length >= 2 && words.every((word) => word.length > 1)) {
+      guessedName = titleCase(normalized);
       break;
     }
   }
 
-  const dobIso = dobMatch ? toIsoDateFromDmy(dobMatch[1], dobMatch[2], dobMatch[3]) : null;
-  const allDateMatches = Array.isArray(expiryMatch) ? expiryMatch : [];
-  const expiryCandidate = allDateMatches.length > 1 ? allDateMatches[allDateMatches.length - 1] : null;
-  const expiryParts = expiryCandidate
-    ? expiryCandidate.match(/(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[\/\s-]*(\d{2})/)
-    : null;
-  const expiryIso = expiryParts ? toIsoDateFromDmy(expiryParts[1], expiryParts[2], expiryParts[3]) : null;
-
   return {
     name: guessedName,
-    passportNumber: passportMatch ? passportMatch[0].replace(/\s+/g, '') : null,
-    dateOfBirth: dobIso,
-    nationality: nationalityMatch ? nationalityMatch[0] : null,
-    expiryDate: expiryIso,
-    gender: upper.includes(' F ') ? 'F' : upper.includes(' M ') ? 'M' : null,
+    passportNumber: passportMatch ? passportMatch[0] : null,
+    dateOfBirth: dates[0] || null,
+    nationality: nationalityMatch ? titleCase(nationalityMatch[0]) : null,
+    expiryDate: dates.length > 1 ? dates[dates.length - 1] : null,
+    gender: /\bF\b/.test(upper) ? 'F' : /\bM\b/.test(upper) ? 'M' : null,
+    confidence: 0.55,
   };
 };
 
-// ── MOCK DATA ─────────────────────────────────────────────
-const getMockData = () => {
-  console.log('🎭 Mock data returning');
+const hasRequiredPassportData = (data) => {
+  if (!data) return false;
+  return Boolean(data.name && data.passportNumber && data.dateOfBirth && data.nationality);
+};
+
+const normalizePassportPayload = (data) => {
+  const merged = { ...emptyPassport(), ...(data || {}) };
   return {
-    name: 'Anam Parwez',
-    passportNumber: 'A1234567',
-    dateOfBirth: '1998-05-15',
-    nationality: 'Indian',
-    expiryDate: '2028-05-14',
-    gender: 'F',
+    ...merged,
+    name: merged.name || null,
+    passportNumber: merged.passportNumber || null,
+    dateOfBirth: merged.dateOfBirth || null,
+    nationality: merged.nationality || null,
+    expiryDate: merged.expiryDate || null,
+    gender: merged.gender || null,
+    confidence: Number(merged.confidence || 0),
   };
 };
 

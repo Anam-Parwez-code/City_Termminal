@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 
 import apiService from '../services/apiService';
+import adminService from '../services/adminService';
 import { useTranslation } from 'react-i18next';
 
 // ============================================================
@@ -191,6 +192,8 @@ const SlotBookingScreen = ({ navigation, route }) => {
               if (!result?.success || !result?.confirmation) {
                 throw new Error(result?.message || 'Booking completed but confirmation data was missing.');
               }
+
+              await adminService.saveCurrentBookingId(resolvedBookingId);
 
               // Confirmation + QR Screen pe jaao
               navigation.navigate('Confirmation', {

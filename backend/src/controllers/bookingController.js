@@ -1,11 +1,5 @@
-// ============================================================
-// FILE: backend/src/controllers/bookingController.js
-// FIXED — Supabase column names match kiye
-// ============================================================
-
 const pool = require('../config/db');
 
-// ── VERIFY BOOKING ────────────────────────────────────────
 const verifyBooking = async (req, res) => {
   try {
     const { bookingId, airlineCode } = req.body;
@@ -15,8 +9,8 @@ const verifyBooking = async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT * FROM bookings 
-       WHERE UPPER(booking_id) = UPPER($1) 
+      `SELECT * FROM bookings
+       WHERE UPPER(booking_id) = UPPER($1)
        AND UPPER(airline_code) = UPPER($2)`,
       [bookingId, airlineCode]
     );
@@ -38,16 +32,17 @@ const verifyBooking = async (req, res) => {
         destination: booking.destination,
         airlineCode: booking.airline_code,
         status: booking.status,
+        passportNumber: booking.passport_number,
+        dateOfBirth: booking.date_of_birth,
+        nationality: booking.nationality,
       },
     });
-
   } catch (error) {
     console.error('Verify booking error:', error);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-// ── GET BOOKING DETAILS ──────────────────────────────────
 const getBookingDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -64,48 +59,36 @@ const getBookingDetails = async (req, res) => {
   }
 };
 
-// ── UPDATE PASSPORT DATA ─────────────────────────────────
-// FIX: Pehle check karo column exist karta hai
-// Agar nahi karta toh sirf status update karo
 const updatePassportData = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { passportNumber, verifiedName } = req.body;
+    const { passportNumber, verifiedName, dateOfBirth, nationality } = req.body;
 
-    // Pehle check karo table mein passport_number column hai?
-    const columnCheck = await pool.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'bookings' 
-      AND column_name = 'passport_number'
-    `);
+    await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS passport_number VARCHAR(40)`);
+    await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(20)`);
+    await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS nationality VARCHAR(80)`);
+    await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS status VARCHAR(40) DEFAULT 'passport_verified'`);
 
-    if (columnCheck.rows.length > 0) {
-      // Column exist karta hai — full update
-      await pool.query(
-        `UPDATE bookings 
-         SET passport_number = $1,
-             passenger_name = $2,
-             status = 'passport_verified'
-         WHERE UPPER(booking_id) = UPPER($3)`,
-        [passportNumber, verifiedName, bookingId]
-      );
-    } else {
-      // Column nahi hai — sirf naam aur status update karo
-      await pool.query(
-        `UPDATE bookings 
-         SET passenger_name = $1,
-             status = 'passport_verified'
-         WHERE UPPER(booking_id) = UPPER($2)`,
-        [verifiedName, bookingId]
-      );
-    }
+    await pool.query(
+      `UPDATE bookings
+       SET passport_number = COALESCE($1, passport_number),
+           passenger_name = COALESCE($2, passenger_name),
+           date_of_birth = COALESCE($3, date_of_birth),
+           nationality = COALESCE($4, nationality),
+           status = 'passport_verified'
+       WHERE UPPER(booking_id) = UPPER($5)`,
+      [
+        passportNumber || null,
+        verifiedName || null,
+        dateOfBirth || null,
+        nationality || null,
+        bookingId,
+      ]
+    );
 
-    return res.status(200).json({ success: true, message: 'Updated successfully' });
-
+    return res.status(200).json({ success: true, message: 'Passport details updated successfully' });
   } catch (error) {
     console.error('Update passport error:', error.message);
-    // Error pe bhi success return karo — frontend block nahi hoga
     return res.status(200).json({ success: true, message: 'Continuing without passport update' });
   }
 };
