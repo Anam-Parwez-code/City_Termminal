@@ -94,6 +94,9 @@ const translations = {
         selectSlotMessage: "Please select a time slot to continue.",
         selectedAt: "at",
         confirmButton: "Confirm Slot & Get QR Code",
+        searchPlaceholder: "Search terminal or pickup stop…",
+        searchHint: "Like Uber — next step opens map for exact pickup pin.",
+        noSearchMatches: "Nothing matches your search. Try another name or clear the search bar.",
       },
       confirmation: {
         successTitle: "Booking Confirmed!",
@@ -244,6 +247,9 @@ const translations = {
         selectSlotMessage: "يرجى اختيار موعد للمتابعة.",
         selectedAt: "في",
         confirmButton: "تأكيد الموعد والحصول على رمز QR",
+        searchPlaceholder: "ابحث عن المحطة أو نقطة الالتقاط…",
+        searchHint: "كأوبر — الخطوة التالية تفتح الخريطة لوضع نقطة الاستلام بدقة.",
+        noSearchMatches: "لا توجد نتائج مطابقة. جرّب اسمًا آخر أو امسح البحث.",
       },
       confirmation: {
         successTitle: "تم تأكيد الحجز!",

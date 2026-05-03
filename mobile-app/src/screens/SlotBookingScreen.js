@@ -15,11 +15,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
   ActivityIndicator,
   Alert,
   FlatList,
   Animated,
+  TextInput,
+  Platform,
 } from 'react-native';
 
 import apiService from '../services/apiService';
@@ -142,10 +143,19 @@ const SlotBookingScreen = ({ navigation, route }) => {
 
   // ── STATES ───────────────────────────────────────────────
   const [slots, setSlots] = useState([]);           // Available slots
+  const [slotQuery, setSlotQuery] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(null); // Chosen slot
   const [isLoadingSlots, setIsLoadingSlots] = useState(true); // Slots load ho raha
   const [isBooking, setIsBooking] = useState(false); // Booking API chal raha
   const sheetAnim = useRef(new Animated.Value(0)).current;
+
+  const filteredSlots = React.useMemo(() => {
+    const q = slotQuery.trim().toLowerCase();
+    if (!q) return slots;
+    return slots.filter((slot) =>
+      `${slot.location_name} ${slot.location_address}`.toLowerCase().includes(q),
+    );
+  }, [slots, slotQuery]);
 
   // ── FETCH SLOTS — Screen load hone pe ───────────────────
   useEffect(() => {
@@ -252,6 +262,29 @@ const SlotBookingScreen = ({ navigation, route }) => {
         </Text>
       </View>
 
+      {/* ── UBER‑STYLE SEARCH (filters terminal / shuttle stops by name or address) ── */}
+      {!isLoadingSlots && slots.length > 0 ? (
+        <View style={[styles.searchCard, isRTL && styles.searchCardRtl]}>
+          <Text style={styles.searchIcon}>⌕</Text>
+          <TextInput
+            value={slotQuery}
+            onChangeText={setSlotQuery}
+            placeholder={t('slotBooking.searchPlaceholder')}
+            placeholderTextColor="#6B7280"
+            style={[styles.searchInput, isRTL && styles.textRight]}
+          />
+          {slotQuery.length > 0 ? (
+            <TouchableOpacity onPress={() => setSlotQuery('')} hitSlop={12}>
+              <Text style={styles.searchClear}>×</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
+
+      {!isLoadingSlots && slots.length > 0 ? (
+        <Text style={[styles.searchHint, isRTL && styles.textRight]}>{t('slotBooking.searchHint')}</Text>
+      ) : null}
+
       {/* ── FLIGHT REMINDER ── */}
       <View style={styles.flightReminder}>
         <Text style={styles.reminderText}>
@@ -285,10 +318,21 @@ const SlotBookingScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         </View>
 
+      ) : filteredSlots.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyIcon}>📍</Text>
+          <Text style={styles.emptyTitle}>{t('slotBooking.noSlots')}</Text>
+          <Text style={[styles.emptySubtitle, isRTL && styles.textRight]}>
+            {t('slotBooking.noSearchMatches')} ({slotQuery})
+          </Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => setSlotQuery('')}>
+            <Text style={styles.retryText}>{t('slotBooking.refresh')}</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         // Slots list
         <FlatList
-          data={slots}
+          data={filteredSlots}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <SlotCard
@@ -305,7 +349,7 @@ const SlotBookingScreen = ({ navigation, route }) => {
       )}
 
       {/* ── BOTTOM BUTTON ── */}
-      {!isLoadingSlots && slots.length > 0 && (
+      {!isLoadingSlots && filteredSlots.length > 0 && (
         <Animated.View
           style={[
             styles.bottomArea,
@@ -405,6 +449,37 @@ const styles = StyleSheet.create({
   },
 
   subtitle: { fontSize: 14, color: '#A7B0C0', lineHeight: 20 },
+
+  searchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#15171B',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2A2F36',
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 4,
+    marginBottom: 8,
+    gap: 8,
+  },
+
+  searchCardRtl: {
+    flexDirection: 'row-reverse',
+  },
+
+  searchIcon: { fontSize: 18, color: '#47D361' },
+
+  searchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+    paddingVertical: 8,
+  },
+
+  searchClear: { fontSize: 22, color: '#9CA3AF', fontWeight: '700', paddingHorizontal: 4 },
+
+  searchHint: { fontSize: 12, color: '#6B7280', marginBottom: 16, lineHeight: 17 },
 
   // Flight reminder
   flightReminder: {

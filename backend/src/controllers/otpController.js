@@ -11,8 +11,9 @@ const STATUS_LABELS = {
   dispatched: 'Dispatched',
   en_route: 'En Route',
   arrived_pickup: 'Arrived at Pickup',
+  barcode_issued: 'Barcode issued',
   en_route_airport: 'En Route to Airport',
-  at_airport: 'At Airport',
+  at_airport: 'Arrived',
 };
 
 const fallbackAssignments = new Map();
@@ -103,6 +104,94 @@ const ensureVehicleTables = async () => {
   }
 };
 
+const ensureVehicleTrackingColumns = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS vehicle_tracking (
+      id SERIAL PRIMARY KEY,
+      booking_id VARCHAR(20),
+      vehicle_number VARCHAR(20),
+      driver_name VARCHAR(80),
+      passenger_count INT DEFAULT 1,
+      status VARCHAR(40) DEFAULT 'Assigned',
+      current_location VARCHAR(255),
+      map_x NUMERIC DEFAULT 0.48,
+      map_y NUMERIC DEFAULT 0.58,
+      wait_minutes INT DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE vehicle_tracking ADD COLUMN IF NOT EXISTS driver_lat DECIMAL(10,8)`);
+  await pool.query(`ALTER TABLE vehicle_tracking ADD COLUMN IF NOT EXISTS driver_lng DECIMAL(11,8)`);
+};
+
+const coordsToMapXY = (lat, lng) => {
+  if (lat == null || lng == null) return { x: 0.48, y: 0.58 };
+  const minLat = 24.95;
+  const maxLat = 25.42;
+  const minLng = 54.89;
+  const maxLng = 55.61;
+  const x = Math.max(0, Math.min(1, (Number(lng) - minLng) / (maxLng - minLng)));
+  const y = Math.max(0, Math.min(1, 1 - (Number(lat) - minLat) / (maxLat - minLat)));
+  return { x: Number(x.toFixed(4)), y: Number(y.toFixed(4)) };
+};
+
+const upsertVehicleTracking = async ({
+  bookingId,
+  vehicleId,
+  driverName,
+  status,
+  currentLocation,
+  lat,
+  lng,
+}) => {
+  await ensureVehicleTrackingColumns();
+  const { x, y } = coordsToMapXY(lat, lng);
+  const upd = await pool.query(
+    `UPDATE vehicle_tracking
+     SET vehicle_number = $2,
+         driver_name = $3,
+         status = $4,
+         current_location = $5,
+         map_x = $6,
+         map_y = $7,
+         driver_lat = COALESCE($8, driver_lat),
+         driver_lng = COALESCE($9, driver_lng),
+         updated_at = NOW()
+     WHERE UPPER(booking_id) = UPPER($1)
+     RETURNING id`,
+    [bookingId, vehicleId, driverName, status, currentLocation, x, y, lat ?? null, lng ?? null]
+  );
+  if (upd.rowCount > 0) return;
+  await pool.query(
+    `INSERT INTO vehicle_tracking (
+       booking_id, vehicle_number, driver_name, passenger_count, status,
+       current_location, map_x, map_y, driver_lat, driver_lng, wait_minutes, updated_at
+     )
+     VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, 0, NOW())`,
+    [bookingId, vehicleId, driverName, status, currentLocation, x, y, lat ?? null, lng ?? null]
+  );
+};
+
+const emitTripUpdate = (req, payload) => {
+  const io = req.app?.get?.('io');
+  if (!io) return;
+  const bookingKey = payload.bookingId || payload.booking_id;
+  if (bookingKey) io.to(`booking:${bookingKey}`).emit('status_update', payload);
+  io.to('dispatch').emit('vehicle_update', payload);
+};
+
+const buildBarcodePayload = (assignment, overrides = {}) =>
+  JSON.stringify({
+    bookingId: assignment.booking_id,
+    vehicleId: assignment.vehicle_id,
+    driverName: assignment.driver_name,
+    driverPhone: assignment.driver_phone,
+    pickupLocation: assignment.pickup_location,
+    destinationTerminal: assignment.destination_terminal,
+    issuedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
 const toClientStatus = (row, statusOverride) => {
   const status = statusOverride || row.status || 'dispatched';
   return {
@@ -122,7 +211,16 @@ const toClientStatus = (row, statusOverride) => {
     destinationTerminal: row.destination_terminal,
     reachedPickup: row.reached_pickup,
     reachedAirport: row.reached_airport,
-    etaMinutes: status === 'at_airport' || status === 'arrived_pickup' ? 0 : status === 'en_route_airport' ? 10 : status === 'en_route' ? 12 : 18,
+    driverLat: row.driver_live_lat != null ? Number(row.driver_live_lat) : null,
+    driverLng: row.driver_live_lng != null ? Number(row.driver_live_lng) : null,
+    etaMinutes:
+      status === 'at_airport' || status === 'arrived_pickup' || status === 'barcode_issued'
+        ? 0
+        : status === 'en_route_airport'
+          ? 10
+          : status === 'en_route'
+            ? 12
+            : 18,
     updatedAt: row.updated_at,
   };
 };
@@ -130,10 +228,12 @@ const toClientStatus = (row, statusOverride) => {
 const getSimulatedStatus = (row) => {
   if (row.reached_airport || row.status === 'at_airport') return 'at_airport';
 
-  if (row.barcode_scanned || row.luggage_tagged || row.status === 'en_route_airport') {
+  if (row.status === 'barcode_issued') return 'barcode_issued';
+
+  if (row.status === 'en_route_airport') {
     const updatedAt = new Date(row.updated_at || row.created_at).getTime();
     const airportAgeSeconds = Math.floor((Date.now() - updatedAt) / 1000);
-    return airportAgeSeconds >= 20 ? 'at_airport' : 'en_route_airport';
+    return airportAgeSeconds >= 25 ? 'at_airport' : 'en_route_airport';
   }
 
   if (row.reached_pickup || row.status === 'arrived_pickup') return 'arrived_pickup';
@@ -158,10 +258,13 @@ const pickDriver = async () => {
 
 const getAssignmentByBookingId = async (bookingId) => {
   const result = await pool.query(
-    `SELECT *
-     FROM vehicle_assignments
-     WHERE UPPER(booking_id) = UPPER($1)
-     ORDER BY created_at DESC
+    `SELECT va.*,
+            dr.current_lat AS driver_live_lat,
+            dr.current_lng AS driver_live_lng
+     FROM vehicle_assignments va
+     LEFT JOIN drivers dr ON dr.vehicle_id = va.vehicle_id
+     WHERE UPPER(va.booking_id) = UPPER($1)
+     ORDER BY va.created_at DESC
      LIMIT 1`,
     [bookingId]
   );
@@ -224,15 +327,64 @@ const assignVehicle = async (req, res) => {
       [vehicleId]
     );
 
+    const inserted = result.rows[0];
+    const plat = pickupCoordinates?.lat ?? null;
+    const plng = pickupCoordinates?.lng ?? null;
+    try {
+      await upsertVehicleTracking({
+        bookingId,
+        vehicleId,
+        driverName: driver.name,
+        status: 'En route to pickup',
+        currentLocation: inserted.current_location,
+        lat: plat,
+        lng: plng,
+      });
+    } catch (_e) {
+      /* offline DB */
+    }
+    const map = coordsToMapXY(plat, plng);
+    emitTripUpdate(req, {
+      bookingId,
+      booking_id: bookingId,
+      vehicle_number: vehicleId,
+      vehicleId,
+      driver_name: driver.name,
+      driver: driver.name,
+      passengers: 1,
+      status: 'En route to pickup',
+      current_location: inserted.current_location,
+      map_x: map.x,
+      map_y: map.y,
+      updated_at: new Date().toISOString(),
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Vehicle assigned',
-      assignment: toClientStatus(result.rows[0]),
+      assignment: toClientStatus(inserted),
     });
   } catch (error) {
     console.error('Assign vehicle error:', error);
     const fallback = makeFallbackAssignment(req.body || {});
     fallbackAssignments.set(String(fallback.booking_id).toUpperCase(), fallback);
+    const plat = req.body?.pickupCoordinates?.lat ?? null;
+    const plng = req.body?.pickupCoordinates?.lng ?? null;
+    const map = coordsToMapXY(plat, plng);
+    emitTripUpdate(req, {
+      bookingId: fallback.booking_id,
+      booking_id: fallback.booking_id,
+      vehicle_number: fallback.vehicle_id,
+      vehicleId: fallback.vehicle_id,
+      driver_name: fallback.driver_name,
+      driver: fallback.driver_name,
+      passengers: 1,
+      status: 'En route to pickup',
+      current_location: fallback.current_location,
+      map_x: map.x,
+      map_y: map.y,
+      updated_at: new Date().toISOString(),
+    });
     return res.status(200).json({
       success: true,
       demoMode: true,
@@ -258,23 +410,44 @@ const verifyVehicle = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Vehicle ID does not match this booking' });
     }
 
+    const barcodePayload = buildBarcodePayload(assignment);
     const result = await pool.query(
       `UPDATE vehicle_assignments
        SET vehicle_verified = true,
-           barcode_scanned = true,
-           luggage_tagged = true,
-           status = 'en_route_airport',
-           current_location = 'Luggage tagged - en route to airport',
+           barcode_scanned = false,
+           luggage_tagged = false,
+           barcode_data = $2,
+           status = 'barcode_issued',
+           current_location = $3,
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [assignment.id]
+      [
+        assignment.id,
+        barcodePayload,
+        'Boarding barcode issued — luggage tag synced with dashboard',
+      ]
     );
+
+    const rowAfter = await getAssignmentByBookingId(bookingId);
+    emitTripUpdate(req, {
+      bookingId,
+      booking_id: bookingId,
+      vehicle_number: assignment.vehicle_id,
+      vehicleId: assignment.vehicle_id,
+      driver_name: assignment.driver_name,
+      driver_phone: assignment.driver_phone,
+      driver: assignment.driver_name,
+      status: 'Barcode issued — boarding',
+      current_location: 'Boarding barcode issued',
+      barcode_data: barcodePayload,
+      updated_at: new Date().toISOString(),
+    });
 
     return res.status(200).json({
       success: true,
-      message: 'Vehicle verified and luggage tagged',
-      status: toClientStatus(result.rows[0]),
+      message: 'Vehicle verified — show barcode / luggage QR to driver',
+      status: toClientStatus(rowAfter || result.rows[0], 'barcode_issued'),
     });
   } catch (error) {
     const fallback = fallbackAssignments.get(String(req.body?.bookingId || '').toUpperCase());
@@ -283,12 +456,160 @@ const verifyVehicle = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Vehicle ID does not match this booking' });
     }
     fallback.vehicle_verified = true;
-    fallback.barcode_scanned = true;
-    fallback.luggage_tagged = true;
-    fallback.status = 'en_route_airport';
-    fallback.current_location = 'Luggage tagged - en route to airport';
+    fallback.barcode_scanned = false;
+    fallback.luggage_tagged = false;
+    fallback.status = 'barcode_issued';
+    fallback.barcode_data = buildBarcodePayload(fallback);
+    fallback.current_location = 'Boarding barcode issued — luggage tag synced with dashboard';
     fallback.updated_at = new Date();
-    return res.status(200).json({ success: true, demoMode: true, status: toClientStatus(fallback) });
+    emitTripUpdate(req, {
+      bookingId: fallback.booking_id,
+      booking_id: fallback.booking_id,
+      vehicle_number: fallback.vehicle_id,
+      vehicleId: fallback.vehicle_id,
+      driver_name: fallback.driver_name,
+      driver_phone: fallback.driver_phone,
+      driver: fallback.driver_name,
+      status: 'Barcode issued — boarding',
+      barcode_data: fallback.barcode_data,
+      updated_at: new Date().toISOString(),
+    });
+    return res.status(200).json({ success: true, demoMode: true, status: toClientStatus(fallback, 'barcode_issued') });
+  }
+};
+
+const startAirportTrip = async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+    if (!bookingId) {
+      return res.status(400).json({ success: false, message: 'bookingId is required' });
+    }
+    await ensureVehicleTables();
+    const assignment = await getAssignmentByBookingId(bookingId);
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Vehicle assignment not found' });
+    }
+    if (!assignment.vehicle_verified) {
+      return res.status(400).json({ success: false, message: 'Verify vehicle ID before starting airport trip' });
+    }
+
+    const result = await pool.query(
+      `UPDATE vehicle_assignments
+       SET status = 'en_route_airport',
+           luggage_tagged = true,
+           barcode_scanned = true,
+           current_location = $2,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [assignment.id, `Heading to ${assignment.destination_terminal}`]
+    );
+
+    const rowAfter = await getAssignmentByBookingId(bookingId);
+    const loc = rowAfter || result.rows[0];
+    await upsertVehicleTracking({
+      bookingId,
+      vehicleId: loc.vehicle_id,
+      driverName: loc.driver_name,
+      status: 'En route to Airport',
+      currentLocation: loc.current_location,
+      lat: null,
+      lng: null,
+    });
+    emitTripUpdate(req, {
+      bookingId,
+      booking_id: bookingId,
+      vehicle_number: loc.vehicle_id,
+      vehicleId: loc.vehicle_id,
+      driver_name: loc.driver_name,
+      driver: loc.driver_name,
+      passengers: 1,
+      status: 'En route to Airport',
+      current_location: loc.current_location,
+      updated_at: new Date().toISOString(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Airport trip started',
+      status: toClientStatus(loc, 'en_route_airport'),
+    });
+  } catch (error) {
+    const fallback = fallbackAssignments.get(String(req.body?.bookingId || '').toUpperCase());
+    if (!fallback) return res.status(500).json({ success: false, message: error.message });
+    fallback.status = 'en_route_airport';
+    fallback.luggage_tagged = true;
+    fallback.barcode_scanned = true;
+    fallback.current_location = `Heading to ${fallback.destination_terminal}`;
+    fallback.updated_at = new Date();
+    emitTripUpdate(req, {
+      bookingId: fallback.booking_id,
+      booking_id: fallback.booking_id,
+      vehicle_number: fallback.vehicle_id,
+      status: 'En route to Airport',
+      current_location: fallback.current_location,
+      updated_at: new Date().toISOString(),
+    });
+    return res.status(200).json({ success: true, demoMode: true, status: toClientStatus(fallback, 'en_route_airport') });
+  }
+};
+
+const updateDriverLocation = async (req, res) => {
+  try {
+    const { bookingId, vehicleId, lat, lng } = req.body || {};
+    if (!vehicleId || lat == null || lng == null) {
+      return res.status(400).json({ success: false, message: 'vehicleId, lat, lng required' });
+    }
+    await ensureVehicleTables();
+
+    await pool.query(
+      `UPDATE drivers SET current_lat = $1, current_lng = $2 WHERE UPPER(vehicle_id::text) = UPPER($3::text)`,
+      [lat, lng, vehicleId]
+    );
+
+    if (bookingId) {
+      const assignment = await getAssignmentByBookingId(bookingId);
+      if (
+        assignment &&
+        String(assignment.vehicle_id).toUpperCase() === String(vehicleId).toUpperCase()
+      ) {
+        await upsertVehicleTracking({
+          bookingId,
+          vehicleId,
+          driverName: assignment.driver_name,
+          status:
+            assignment.status === 'en_route_airport'
+              ? 'En route to Airport'
+              : 'En route to pickup',
+          currentLocation:
+            assignment.status === 'en_route_airport'
+              ? assignment.current_location || `Heading to ${assignment.destination_terminal}`
+              : assignment.pickup_location || assignment.current_location || 'Driving',
+          lat,
+          lng,
+        });
+      }
+    }
+
+    const map = coordsToMapXY(Number(lat), Number(lng));
+    emitTripUpdate(req, {
+      bookingId,
+      booking_id: bookingId,
+      vehicleId,
+      vehicle_number: vehicleId,
+      lat,
+      lng,
+      map_x: map.x,
+      map_y: map.y,
+      current_location: 'Live GPS',
+      status: bookingId ? 'Live' : 'Dispatch',
+      updated_at: new Date().toISOString(),
+    });
+
+    return res.status(200).json({ success: true, message: 'Location updated' });
+  } catch (error) {
+    console.error('updateDriverLocation', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -313,6 +634,29 @@ const reachedAirport = async (req, res) => {
     );
 
     await pool.query(`UPDATE drivers SET is_available = true WHERE vehicle_id = $1`, [assignment.vehicle_id]);
+
+    try {
+      await upsertVehicleTracking({
+        bookingId: assignment.booking_id,
+        vehicleId: assignment.vehicle_id,
+        driverName: assignment.driver_name,
+        status: 'At terminal',
+        currentLocation: assignment.destination_terminal,
+        lat: null,
+        lng: null,
+      });
+    } catch (_e) {}
+    emitTripUpdate(req, {
+      bookingId: assignment.booking_id,
+      booking_id: assignment.booking_id,
+      vehicle_number: assignment.vehicle_id,
+      vehicleId: assignment.vehicle_id,
+      driver_name: assignment.driver_name,
+      driver: assignment.driver_name,
+      status: 'Arrived — At Airport',
+      current_location: assignment.destination_terminal,
+      updated_at: new Date().toISOString(),
+    });
 
     return res.status(200).json({
       success: true,
@@ -389,6 +733,8 @@ const getStatus = async (req, res) => {
 module.exports = {
   assignVehicle,
   verifyVehicle,
+  startAirportTrip,
+  updateDriverLocation,
   reachedAirport,
   getStatus,
 };

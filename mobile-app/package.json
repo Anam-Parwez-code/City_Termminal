@@ -20,6 +20,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-updates": "^55.0.21",
     "i18next": "^26.0.6",
+    "leaflet": "^1.9.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-i18next": "^17.0.4",

@@ -102,7 +102,7 @@ const LanguageSelectScreen = ({ navigation }) => {
 
     // BookingScreen pe navigate karo
     // Stack mein add hoga — back button kaam karega
-    navigation.navigate('BookingEntry');
+    navigation.navigate('Auth');
 
   };
 
@@ -219,7 +219,7 @@ const LanguageSelectScreen = ({ navigation }) => {
         </TouchableOpacity>
 
         {/* Skip option */}
-        <TouchableOpacity onPress={() => navigation.navigate('BookingEntry')}>
+        <TouchableOpacity onPress={() => navigation.navigate('Auth')}>
           <Text style={styles.skipText}>{t('languageSelect.skip')}</Text>
         </TouchableOpacity>
 

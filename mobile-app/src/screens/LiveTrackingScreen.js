@@ -5,11 +5,17 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
+  Alert,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import apiService from '../services/apiService';
+import { io } from 'socket.io-client';
+import TripMap from '../components/TripMap';
+import apiService, { getSocketBaseUrl } from '../services/apiService';
 
 const { height } = Dimensions.get('window');
 
@@ -26,22 +32,31 @@ const COLORS = {
 
 const STAGES = [
   { key: 'dispatched', label: 'Dispatched', eta: 18, progress: 0.08, x: 0.18, y: 0.72 },
-  { key: 'en_route', label: 'En Route', eta: 12, progress: 0.32, x: 0.34, y: 0.62 },
-  { key: 'arrived_pickup', label: 'Arrived at Pickup', eta: 0, progress: 0.5, x: 0.48, y: 0.54 },
-  { key: 'en_route_airport', label: 'En Route to Airport', eta: 10, progress: 0.76, x: 0.65, y: 0.42 },
-  { key: 'at_airport', label: 'At Airport', eta: 0, progress: 1, x: 0.8, y: 0.3 },
+  { key: 'en_route', label: 'En Route', eta: 12, progress: 0.26, x: 0.34, y: 0.62 },
+  { key: 'arrived_pickup', label: 'At Pickup Zone', eta: 0, progress: 0.42, x: 0.48, y: 0.54 },
+  { key: 'barcode_issued', label: 'Barcode ready', eta: 0, progress: 0.54, x: 0.56, y: 0.5 },
+  { key: 'en_route_airport', label: 'En Route to Airport', eta: 10, progress: 0.78, x: 0.68, y: 0.4 },
+  { key: 'at_airport', label: 'Arrived — Airport', eta: 0, progress: 1, x: 0.82, y: 0.3 },
 ];
 
 const normalizeStatus = (value) => {
   const raw = String(value || '').toLowerCase().replace(/\s+/g, '_');
-  if (raw.includes('airport') && (raw.includes('arrived') || raw.includes('at_') || raw.includes('reached'))) return 'at_airport';
-  if (raw.includes('en_route_airport') || raw.includes('heading_to_airport') || raw.includes('picked_up')) return 'en_route_airport';
+  if (raw.includes('barcode')) return 'barcode_issued';
+  if (raw.includes('airport') && (raw.includes('arrived') || raw.includes('at_') || raw.includes('reached')))
+    return 'at_airport';
+  if (
+    raw.includes('en_route_airport') ||
+    raw.includes('heading_to_airport') ||
+    raw.includes('picked_up')
+  )
+    return 'en_route_airport';
   if (raw.includes('pickup') && (raw.includes('arrived') || raw.includes('reached'))) return 'arrived_pickup';
   if (raw.includes('en_route')) return 'en_route';
   return raw || 'dispatched';
 };
 
-const stageForStatus = (status) => STAGES.find((stage) => stage.key === normalizeStatus(status)) || STAGES[0];
+const stageForStatus = (status) =>
+  STAGES.find((stage) => stage.key === normalizeStatus(status)) || STAGES[0];
 
 const LiveTrackingScreen = ({ navigation, route }) => {
   const { i18n } = useTranslation();
@@ -49,97 +64,247 @@ const LiveTrackingScreen = ({ navigation, route }) => {
   const params = route?.params || {};
   const bookingId = params.bookingId || params.bookingData?.bookingId || params.bookingData?.booking_id;
   const confirmation = params.confirmation || {};
-  const [statusData, setStatusData] = useState(null);
-  const [localStageIndex, setLocalStageIndex] = useState(0);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  const vehicleId = statusData?.vehicleId || statusData?.vehicle_id || confirmation.vehicleId || confirmation.vehicleNumber || 'CT-102';
+  const [statusData, setStatusData] = useState(null);
+  const [enteredVehicleId, setEnteredVehicleId] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [driverCoords, setDriverCoords] = useState(null);
+
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const arrivedPing = useRef(false);
+
+  const vehicleId =
+    statusData?.vehicleId || statusData?.vehicle_id || confirmation.vehicleId || confirmation.vehicleNumber || '—';
+
   const currentStage = useMemo(
-    () => stageForStatus(statusData?.status || STAGES[localStageIndex]?.key),
-    [statusData, localStageIndex]
+    () => stageForStatus(statusData?.status),
+    [statusData?.status],
   );
-  const eta = typeof statusData?.etaMinutes === 'number' ? statusData.etaMinutes : currentStage.eta;
-  const pickupLocation = statusData?.pickupLocation || statusData?.pickup_location || confirmation.locationName || 'Pickup';
-  const destinationTerminal = statusData?.destinationTerminal || statusData?.destination_terminal || confirmation.destinationTerminal || 'DXB';
+  const eta =
+    typeof statusData?.etaMinutes === 'number' ? statusData.etaMinutes : currentStage.eta;
+  const pickupLocation =
+    statusData?.pickupLocation ||
+    statusData?.pickup_location ||
+    confirmation.locationName ||
+    'Pickup';
+
+  const destinationTerminal =
+    statusData?.destinationTerminal ||
+    statusData?.destination_terminal ||
+    confirmation.destinationTerminal ||
+    'DXB';
+
+  const pickupCoords = useMemo(() => {
+    const pl = params.pickupLocation || {};
+    if (pl.lat != null && pl.lng != null && Number.isFinite(+pl.lat) && Number.isFinite(+pl.lng)) {
+      return { lat: +pl.lat, lng: +pl.lng };
+    }
+    return null;
+  }, [params.pickupLocation]);
+
+  const pickupForMap = pickupCoords ? { lat: pickupCoords.lat, lng: pickupCoords.lng } : null;
+
+  const rawDriver =
+    driverCoords ||
+    (statusData?.driverLat != null && statusData?.driverLng != null
+      ? {
+          lat: Number(statusData.driverLat),
+          lng: Number(statusData.driverLng),
+        }
+      : null);
+
+  const validDriverCoords =
+    rawDriver &&
+    Number.isFinite(rawDriver.lat) &&
+    Number.isFinite(rawDriver.lng) &&
+    Math.abs(rawDriver.lat) <= 90 &&
+    Math.abs(rawDriver.lng) <= 180
+      ? rawDriver
+      : null;
+
   const isAtPickup = currentStage.key === 'arrived_pickup';
+  const isBarcodeStage = normalizeStatus(statusData?.status) === 'barcode_issued';
   const isAtAirport = currentStage.key === 'at_airport';
 
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.35, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1.28, duration: 800, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ])
+      ]),
     ).start();
   }, [pulseAnim]);
 
   useEffect(() => {
     let mounted = true;
+
     const fetchStatus = async () => {
       if (!bookingId) return;
       try {
         const result = await apiService.getOTPStatus(bookingId);
-        if (mounted) setStatusData(result.status || result.assignment || null);
+        const next = result.status || result.assignment || null;
+        if (mounted && next) {
+          setStatusData(next);
+          const lat =
+            next.driverLat != null
+              ? Number(next.driverLat)
+              : next.driver_lat != null
+                ? Number(next.driver_lat)
+                : null;
+          const lng =
+            next.driverLng != null
+              ? Number(next.driverLng)
+              : next.driver_lng != null
+                ? Number(next.driver_lng)
+                : null;
+          if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+            setDriverCoords({ lat, lng });
+          }
+        }
       } catch (_err) {
-        // The local stage simulator keeps the UI useful if the API is offline.
+        //
       }
     };
+
     fetchStatus();
-    const pollTimer = setInterval(fetchStatus, 10000);
-    const simTimer = setInterval(() => {
-      setLocalStageIndex((prev) => Math.min(prev + 1, STAGES.length - 1));
-    }, 10000);
+    const pollTimer = setInterval(fetchStatus, 8000);
+
+    const baseUrl = getSocketBaseUrl?.() || '';
+
+    let socket;
+
+    try {
+      if (bookingId && baseUrl.length > 0) {
+        socket = io(baseUrl, {
+          transports: ['websocket', 'polling'],
+          reconnectionDelay: 2000,
+        });
+        socket.emit('join_booking', { bookingId });
+
+        socket.on('location_update', (payload = {}) => {
+          const pb = String(payload.bookingId || payload.booking_id || '').toUpperCase();
+          const my = String(bookingId || '').toUpperCase();
+          if (!pb || pb !== my) return;
+          const lat = payload.lat ?? payload.latitude;
+          const lng = payload.lng ?? payload.longitude;
+          if (lat != null && lng != null) {
+            setDriverCoords({ lat: Number(lat), lng: Number(lng) });
+          }
+        });
+
+        socket.on('status_update', () => fetchStatus());
+      }
+    } catch (_e) {
+      //
+    }
+
     return () => {
       mounted = false;
       clearInterval(pollTimer);
-      clearInterval(simTimer);
+      socket?.disconnect?.();
     };
   }, [bookingId]);
 
-  const goToBarcode = () => {
-    navigation.navigate('Barcode', {
-      ...params,
-      statusData,
-      confirmation: {
-        ...confirmation,
-        vehicleId,
-        vehicleNumber: vehicleId,
-        locationName: pickupLocation,
-        destinationTerminal,
-      },
-    });
+  useEffect(() => {
+    if (!isAtAirport || arrivedPing.current) return;
+
+    arrivedPing.current = true;
+    Alert.alert(
+      Platform.OS === 'web' ? 'Arrived — Airport' : 'Arrived at airport',
+      'Driver has reached the terminal. Your baggage team will offload shortly.',
+      [
+        {
+          text: 'OK',
+          onPress: () =>
+            navigation.replace('Arrived', {
+              ...params,
+              statusData,
+              confirmation: {
+                ...confirmation,
+                vehicleId,
+                vehicleNumber: vehicleId,
+              },
+            }),
+        },
+      ],
+      { cancelable: true },
+    );
+  }, [
+    confirmation,
+    isAtAirport,
+    navigation,
+    params,
+    statusData,
+    vehicleId,
+  ]);
+
+  const handleVerifyVehicle = async () => {
+    if (!enteredVehicleId.trim()) {
+      Alert.alert('Missing Info', 'Please enter the Vehicle ID the driver communicated.');
+      return;
+    }
+    setIsVerifying(true);
+    try {
+      const result = await apiService.verifyVehicleId({
+        bookingId,
+        vehicleId: enteredVehicleId.trim(),
+      });
+      navigation.navigate('Barcode', {
+        ...params,
+        statusData: result.status,
+        confirmation: {
+          ...confirmation,
+          vehicleId: result.status?.vehicleId || enteredVehicleId,
+          vehicleNumber: result.status?.vehicleId || enteredVehicleId,
+          locationName: pickupLocation,
+          destinationTerminal,
+          barcodeData: result.status?.barcodeData,
+          driverName: result.status?.driverName,
+          driverPhone: result.status?.driverPhone,
+        },
+      });
+    } catch (err) {
+      Alert.alert('Verification Failed', err.message || 'Invalid Vehicle ID');
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.mapContainer}>
-        <View style={styles.mapBg}>
-          <View style={styles.gridLineA} />
-          <View style={styles.gridLineB} />
-          <View style={styles.roadMain} />
-          <View style={styles.roadSecondary} />
-          <View style={[styles.marker, styles.pickupMarker]}>
-            <Text style={styles.markerText}>PICKUP</Text>
+        <TripMap
+          pickup={pickupForMap}
+          driver={validDriverCoords}
+          style={[styles.liveMap, { height: height * 0.44 }]}
+        />
+
+        {/* schematic overlay fallback when coords missing */}
+        {!pickupForMap && (
+          <View style={styles.fallbackDots} pointerEvents="none">
+            <View style={styles.gridMini} />
+            <Animated.View
+              style={[
+                styles.vehicleDotMini,
+                {
+                  left: `${currentStage.x * 100}%`,
+                  top: `${currentStage.y * 100}%`,
+                  transform: [{ scale: pulseAnim }],
+                },
+              ]}
+            >
+              <View style={styles.vehicleInnerMini} />
+            </Animated.View>
           </View>
-          <View style={[styles.marker, styles.airportMarker]}>
-            <Text style={styles.markerText}>AIRPORT</Text>
-          </View>
-          <View style={styles.routeLine} />
-          <Animated.View
-            style={[
-              styles.vehicleDot,
-              {
-                left: `${currentStage.x * 100}%`,
-                top: `${currentStage.y * 100}%`,
-                transform: [{ scale: pulseAnim }],
-              },
-            ]}
-          >
-            <View style={styles.vehicleInner} />
-          </Animated.View>
-        </View>
+        )}
+
         <View style={styles.mapHeader}>
-          <Text style={styles.livePill}>LIVE</Text>
+          <TouchableOpacity style={styles.backMini} onPress={() => navigation.goBack()}>
+            <Text style={styles.backMiniText}>{isRTL ? '→' : '←'}</Text>
+          </TouchableOpacity>
+          <View style={styles.livePillWrap}>
+            <Text style={styles.livePillText}>LIVE</Text>
+          </View>
           <Text style={styles.vehiclePill}>{vehicleId}</Text>
         </View>
       </View>
@@ -153,14 +318,39 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <View style={styles.statusCopy}>
             <Text style={[styles.statusTitle, isRTL && styles.textRight]}>{currentStage.label}</Text>
             <Text style={[styles.statusSub, isRTL && styles.textRight]}>
-              {statusData?.currentLocation || statusData?.current_location || `Moving from ${pickupLocation} to ${destinationTerminal}`}
+              {statusData?.currentLocation ||
+                statusData?.current_location ||
+                `Van ${pickupLocation} ⇄ ${destinationTerminal}`}
             </Text>
           </View>
         </View>
 
+        {isBarcodeStage && (
+          <TouchableOpacity
+            style={styles.barcodeBanner}
+            onPress={() =>
+              navigation.navigate('Barcode', {
+                ...params,
+                statusData,
+                confirmation: {
+                  ...confirmation,
+                  barcodeData: statusData?.barcodeData || confirmation.barcodeData,
+                  driverName: statusData?.driverName || confirmation.driverName,
+                  driverPhone: statusData?.driverPhone || confirmation.driverPhone,
+                },
+              })
+            }
+          >
+            <Text style={styles.barcodeBannerTitle}>Boarding barcode is ready</Text>
+            <Text style={styles.barcodeBannerSub}>Open barcode with driver phone + QR</Text>
+          </TouchableOpacity>
+        )}
+
         <View style={styles.stageRail}>
           {STAGES.map((stage) => {
-            const complete = STAGES.findIndex((item) => item.key === currentStage.key) >= STAGES.findIndex((item) => item.key === stage.key);
+            const idxCurrent = STAGES.findIndex((item) => item.key === currentStage.key);
+            const idxStage = STAGES.findIndex((item) => item.key === stage.key);
+            const complete = idxStage <= idxCurrent;
             return (
               <View key={stage.key} style={styles.stageItem}>
                 <View style={[styles.stageDot, complete && styles.stageDotDone]} />
@@ -182,15 +372,44 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <Text style={styles.detailValue}>{destinationTerminal}</Text>
         </View>
 
+        {statusData?.driverPhone ? (
+          <View style={styles.driverCard}>
+            <Text style={styles.detailLabel}>Driver</Text>
+            <Text style={styles.detailValue}>{statusData.driverName || 'Assigned driver'}</Text>
+            <Text style={styles.driverPhone}>{statusData.driverPhone}</Text>
+          </View>
+        ) : null}
+
         {isAtPickup && (
-          <TouchableOpacity style={styles.primaryButton} onPress={goToBarcode}>
-            <Text style={styles.primaryButtonText}>{isRTL ? '<- Show Barcode' : 'Show Barcode ->'}</Text>
-          </TouchableOpacity>
+          <View style={styles.verificationContainer}>
+            <Text style={styles.verificationLabel}>Driver reached you — enter Vehicle ID:</Text>
+            <View style={styles.verificationInputRow}>
+              <TextInput
+                style={styles.verificationInput}
+                placeholder="e.g. CT-102"
+                placeholderTextColor={COLORS.muted}
+                value={enteredVehicleId}
+                onChangeText={setEnteredVehicleId}
+                autoCapitalize="characters"
+              />
+              <TouchableOpacity
+                style={[styles.verifyButton, isVerifying && styles.disabledButton]}
+                onPress={handleVerifyVehicle}
+                disabled={isVerifying}
+              >
+                {isVerifying ? (
+                  <ActivityIndicator color="#08100A" />
+                ) : (
+                  <Text style={styles.verifyButtonText}>Verify</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         {isAtAirport && (
           <View style={styles.airportBanner}>
-            <Text style={styles.airportBannerText}>Luggage at Airport</Text>
+            <Text style={styles.airportBannerText}>Luggage approaching terminal check-in belts</Text>
           </View>
         )}
       </ScrollView>
@@ -200,49 +419,170 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  mapContainer: { height: height * 0.46, position: 'relative' },
-  mapBg: { flex: 1, backgroundColor: COLORS.map, overflow: 'hidden' },
-  gridLineA: { position: 'absolute', width: '130%', height: 1, backgroundColor: '#252A31', top: '32%', left: '-12%', transform: [{ rotate: '-11deg' }] },
-  gridLineB: { position: 'absolute', width: '120%', height: 1, backgroundColor: '#252A31', top: '64%', left: '-8%', transform: [{ rotate: '15deg' }] },
-  roadMain: { position: 'absolute', width: '110%', height: 7, backgroundColor: '#2C323B', left: '-8%', top: '52%', transform: [{ rotate: '-22deg' }], borderRadius: 999 },
-  roadSecondary: { position: 'absolute', width: 6, height: '100%', backgroundColor: '#252A31', left: '63%', top: 0, transform: [{ rotate: '8deg' }] },
-  routeLine: { position: 'absolute', width: '65%', height: 5, backgroundColor: COLORS.green, left: '18%', top: '54%', transform: [{ rotate: '-25deg' }], borderRadius: 999 },
-  marker: { position: 'absolute', backgroundColor: COLORS.card, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: COLORS.line },
-  pickupMarker: { left: '10%', top: '68%' },
-  airportMarker: { right: '10%', top: '25%' },
-  markerText: { color: COLORS.text, fontSize: 10, fontWeight: '900' },
-  vehicleDot: { position: 'absolute', width: 34, height: 34, marginLeft: -17, marginTop: -17, borderRadius: 17, backgroundColor: 'rgba(71,211,97,0.25)', alignItems: 'center', justifyContent: 'center' },
-  vehicleInner: { width: 16, height: 16, borderRadius: 8, backgroundColor: COLORS.green, borderWidth: 3, borderColor: COLORS.text },
-  mapHeader: { position: 'absolute', top: 52, left: 24, right: 24, flexDirection: 'row', justifyContent: 'space-between' },
-  livePill: { color: '#08100A', backgroundColor: COLORS.green, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7, fontSize: 12, fontWeight: '900', overflow: 'hidden' },
-  vehiclePill: { color: COLORS.text, backgroundColor: '#0A0A0BCC', borderRadius: 999, paddingHorizontal: 15, paddingVertical: 7, fontSize: 15, fontWeight: '900', overflow: 'hidden' },
-  panel: { flex: 1, backgroundColor: COLORS.card, marginTop: -28, borderTopLeftRadius: 30, borderTopRightRadius: 30 },
+  mapContainer: { height: height * 0.46, position: 'relative', backgroundColor: COLORS.map },
+  liveMap: { width: '100%' },
+  fallbackDots: { ...StyleSheet.absoluteFillObject, justifyContent: 'center' },
+  gridMini: { flex: 1, opacity: 0.06, backgroundColor: '#fff' },
+  vehicleDotMini: { position: 'absolute', marginLeft: -14, marginTop: -14, width: 28, height: 28 },
+  vehicleInnerMini: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: COLORS.green,
+    borderWidth: 2,
+    borderColor: COLORS.text,
+    opacity: 0.72,
+  },
+  mapHeader: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 52 : 40,
+    left: 18,
+    right: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  backMini: {
+    backgroundColor: '#0a0a0bcc',
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backMiniText: { color: COLORS.text, fontWeight: '900', fontSize: 18 },
+  livePillWrap: {
+    flexShrink: 0,
+    backgroundColor: COLORS.green,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+
+  livePillText: { color: '#08100a', fontWeight: '900', fontSize: 12, letterSpacing: 0.5 },
+  vehiclePill: {
+    color: COLORS.text,
+    backgroundColor: '#0a0a0bcc',
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    fontSize: 14,
+    fontWeight: '900',
+    overflow: 'hidden',
+  },
+  barcodeBanner: {
+    backgroundColor: COLORS.greenDark,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    padding: 16,
+    marginBottom: 14,
+    gap: 4,
+  },
+  barcodeBannerTitle: { color: COLORS.green, fontWeight: '900', fontSize: 16 },
+  barcodeBannerSub: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
+  panel: {
+    flex: 1,
+    backgroundColor: COLORS.card,
+    marginTop: -28,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+  },
   panelContent: { padding: 24, paddingBottom: 40 },
   statusHeader: { flexDirection: 'row', gap: 16, alignItems: 'center', marginBottom: 18 },
   rtlRow: { flexDirection: 'row-reverse' },
-  etaBox: { width: 76, height: 76, borderRadius: 22, backgroundColor: COLORS.green, alignItems: 'center', justifyContent: 'center' },
+  etaBox: {
+    width: 76,
+    height: 76,
+    borderRadius: 22,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   etaNumber: { color: '#08100A', fontSize: 30, fontWeight: '900' },
-  etaLabel: { color: '#0B240F', fontSize: 12, fontWeight: '900' },
+  etaLabel: { color: '#0b240f', fontSize: 12, fontWeight: '900' },
   statusCopy: { flex: 1 },
   statusTitle: { color: COLORS.text, fontSize: 22, fontWeight: '900' },
   statusSub: { color: COLORS.muted, fontSize: 13, lineHeight: 19, marginTop: 4 },
   stageRail: { gap: 10, marginBottom: 16 },
   stageItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  stageDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#3A404A' },
+  stageDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#3a404a' },
   stageDotDone: { backgroundColor: COLORS.green },
   stageLabel: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
   stageLabelDone: { color: COLORS.text },
-  progressBar: { height: 7, borderRadius: 999, backgroundColor: '#2E343D', overflow: 'hidden', marginBottom: 18 },
+  progressBar: {
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: '#2e343d',
+    overflow: 'hidden',
+    marginBottom: 18,
+  },
   progressFill: { height: '100%', backgroundColor: COLORS.green },
-  detailsCard: { backgroundColor: '#101215', borderRadius: 22, padding: 18, borderWidth: 1, borderColor: COLORS.line },
-  vehicleId: { color: COLORS.green, fontSize: 34, fontWeight: '900', marginBottom: 8 },
+  detailsCard: {
+    backgroundColor: '#101215',
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+  },
+  driverCard: {
+    marginTop: 12,
+    backgroundColor: '#101215',
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+  },
+  driverPhone: { marginTop: 6, fontSize: 18, fontWeight: '900', color: COLORS.green },
+  vehicleId: {
+    color: COLORS.green,
+    fontSize: 34,
+    fontWeight: '900',
+    marginBottom: 8,
+  },
   detailLabel: { color: COLORS.muted, fontSize: 12, fontWeight: '900', textTransform: 'uppercase', marginTop: 10 },
   detailValue: { color: COLORS.text, fontSize: 15, fontWeight: '800', marginTop: 4 },
-  primaryButton: { backgroundColor: COLORS.green, borderRadius: 18, paddingVertical: 18, alignItems: 'center', marginTop: 18 },
-  primaryButtonText: { color: '#08100A', fontWeight: '900', fontSize: 16 },
-  airportBanner: { backgroundColor: COLORS.greenDark, borderWidth: 1, borderColor: COLORS.green, borderRadius: 18, padding: 18, alignItems: 'center', marginTop: 18 },
+  airportBanner: {
+    backgroundColor: COLORS.greenDark,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    borderRadius: 18,
+    padding: 18,
+    alignItems: 'center',
+    marginTop: 18,
+  },
   airportBannerText: { color: COLORS.green, fontWeight: '900', fontSize: 18 },
   textRight: { textAlign: 'right' },
+  verificationContainer: {
+    backgroundColor: '#101215',
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    marginTop: 18,
+  },
+  verificationLabel: { color: COLORS.text, fontSize: 14, fontWeight: '800', marginBottom: 12 },
+  verificationInputRow: { flexDirection: 'row', gap: 10 },
+  verificationInput: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    borderRadius: 14,
+    color: COLORS.text,
+    paddingHorizontal: 16,
+    height: 50,
+    fontSize: 16,
+  },
+  verifyButton: {
+    backgroundColor: COLORS.green,
+    borderRadius: 14,
+    paddingHorizontal: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  verifyButtonText: { color: '#08100A', fontWeight: '900', fontSize: 15 },
+  disabledButton: { opacity: 0.45 },
 });
 
 export default LiveTrackingScreen;

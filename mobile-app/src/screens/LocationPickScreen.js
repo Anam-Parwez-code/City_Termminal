@@ -1,37 +1,33 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
-  ScrollView,
+  Dimensions,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ScrollView,
+  Keyboard,
 } from 'react-native';
+import { searchPickupPlaces } from '../services/placesAutocomplete';
+import MapView from '../components/Map';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
+import theme from '../theme';
+
+const { width, height } = Dimensions.get('window');
 
 const COLORS = {
   bg: '#0A0A0B',
   card: '#15171B',
-  card2: '#191C20',
   line: '#2A2F36',
-  green: '#47D361',
+  green: theme.colors.careemGreen,
   greenDark: '#163A1C',
   text: '#FFFFFF',
   muted: '#A7B0C0',
 };
-
-const PICKUP_LOCATIONS = [
-  { name: 'Mall of Emirates', lat: 25.1972, lng: 55.2744 },
-  { name: 'Dubai Mall', lat: 25.1975, lng: 55.2796 },
-  { name: 'JBR Beach Walk', lat: 25.0782, lng: 55.1305 },
-  { name: 'Ibn Battuta Mall', lat: 25.0449, lng: 55.1252 },
-  { name: 'City Walk', lat: 25.2085, lng: 55.2562 },
-  { name: 'Palm Jumeirah', lat: 25.1124, lng: 55.139 },
-];
 
 const TERMINALS = [
   'Dubai International Airport T1 (DXB T1)',
@@ -44,23 +40,69 @@ const LocationPickScreen = ({ navigation, route }) => {
   const { i18n } = useTranslation();
   const isRTL = i18n.dir() === 'rtl';
   const params = route?.params || {};
-  const [search, setSearch] = useState('');
-  const [pickup, setPickup] = useState(null);
+  
+  const [region, setRegion] = useState({
+    latitude: 25.2048,
+    longitude: 55.2708,
+    latitudeDelta: 0.0422,
+    longitudeDelta: 0.0221,
+  });
+  
   const [terminal, setTerminal] = useState(TERMINALS[0]);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [showTerminals, setShowTerminals] = useState(false);
+  const mapRef = useRef(null);
 
-  const filteredLocations = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return PICKUP_LOCATIONS;
-    return PICKUP_LOCATIONS.filter((item) => item.name.toLowerCase().includes(needle));
-  }, [search]);
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeHits, setPlaceHits] = useState([]);
+  const [placesLoading, setPlacesLoading] = useState(false);
+  const [pickupLabel, setPickupLabel] = useState('');
 
-  const handleContinue = async () => {
-    if (!pickup) {
-      Alert.alert('Select pickup', 'Please choose a pickup location first.');
+  useEffect(() => {
+    const q = placeQuery.trim();
+    if (q.length < 3) {
+      setPlaceHits([]);
       return;
     }
+    const tid = setTimeout(async () => {
+      setPlacesLoading(true);
+      try {
+        const list = await searchPickupPlaces(`${q}, Dubai UAE`);
+        setPlaceHits(list);
+      } catch (_err) {
+        setPlaceHits([]);
+      } finally {
+        setPlacesLoading(false);
+      }
+    }, 450);
+    return () => clearTimeout(tid);
+  }, [placeQuery]);
 
+  const handleRegionChangeComplete = (newRegion) => {
+    setRegion(newRegion);
+    if (!pickupLabel.trim()) {
+      setPickupLabel(
+        `Pickup pin — ${Number(newRegion.latitude).toFixed(4)}, ${Number(newRegion.longitude).toFixed(4)}`,
+      );
+    }
+  };
+
+  const flyToHit = (hit) => {
+    setPickupLabel(hit.label.slice(0, 140));
+    setPlaceQuery('');
+    setPlaceHits([]);
+    Keyboard.dismiss();
+    const nextRegion = {
+      latitude: hit.lat,
+      longitude: hit.lng,
+      latitudeDelta: 0.03,
+      longitudeDelta: 0.025,
+    };
+    mapRef.current?.animateToRegion?.(nextRegion, 520);
+    setRegion(nextRegion);
+  };
+
+  const handleContinue = async () => {
     const bookingId = params.bookingId || params.bookingData?.bookingId || params.bookingData?.booking_id;
     if (!bookingId) {
       Alert.alert('Missing booking', 'Booking ID is missing. Please go back and try again.');
@@ -69,23 +111,26 @@ const LocationPickScreen = ({ navigation, route }) => {
 
     setIsAssigning(true);
     try {
+      const coordSuffix = `${region.latitude.toFixed(5)}, ${region.longitude.toFixed(5)}`;
+      const pickupName = pickupLabel?.trim()?.length ? `${pickupLabel.trim()} (${coordSuffix})` : coordSuffix;
+
       const result = await apiService.assignVehicle({
         bookingId,
-        pickupLocation: pickup.name,
+        pickupLocation: pickupName,
         destinationTerminal: terminal,
-        pickupCoordinates: { lat: pickup.lat, lng: pickup.lng },
+        pickupCoordinates: { lat: region.latitude, lng: region.longitude },
       });
 
-      navigation.navigate('BookingConfirm', {
+      navigation.navigate('LiveTracking', {
         ...params,
         bookingId,
-        pickupLocation: pickup,
+        pickupLocation: { name: pickupName, lat: region.latitude, lng: region.longitude },
         destinationTerminal: terminal,
         vehicleAssignment: result.assignment,
         confirmation: {
           ...(params.confirmation || {}),
           ...(result.assignment || {}),
-          locationName: pickup.name,
+          locationName: pickupName,
           destinationTerminal: terminal,
         },
       });
@@ -98,83 +143,108 @@ const LocationPickScreen = ({ navigation, route }) => {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <View style={[styles.header, isRTL && styles.rtlRow]}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Text style={styles.backText}>{isRTL ? '->' : '<-'}</Text>
-          </TouchableOpacity>
-          <View style={styles.headerCopy}>
-            <Text style={[styles.eyebrow, isRTL && styles.textRight]}>Pickup setup</Text>
-            <Text style={[styles.title, isRTL && styles.textRight]}>Where should we meet you?</Text>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        initialRegion={region}
+        onRegionChangeComplete={handleRegionChangeComplete}
+        customMapStyle={mapStyle}
+        showsUserLocation={true}
+        showsMyLocationButton={true}
+      />
+
+      <View style={styles.centerPinContainer} pointerEvents="none">
+        <View style={styles.pinBubble}>
+          <Text style={styles.pinText}>CT</Text>
+        </View>
+        <View style={styles.pinStem} />
+        <View style={styles.pinShadow} />
+      </View>
+
+      <View style={styles.headerOverlay}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backText}>{isRTL ? '→' : '←'}</Text>
+        </TouchableOpacity>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.headerEyebrow}>Set Pickup</Text>
+          <Text style={styles.headerTitle}>Where are you?</Text>
+        </View>
+      </View>
+
+      <View style={styles.bottomSheet}>
+        <View style={styles.sheetHandle} />
+
+        <Text style={styles.searchPrompt}>Where should we collect you?</Text>
+        <View style={styles.searchRow}>
+          <TextInput
+            value={placeQuery}
+            onChangeText={setPlaceQuery}
+            placeholder="Search Dubai area (Uber-style)"
+            placeholderTextColor={COLORS.muted}
+            style={styles.searchField}
+          />
+          {placesLoading ? <ActivityIndicator size="small" color={COLORS.green} /> : null}
+        </View>
+
+        {placeHits.length > 0 ? (
+          <ScrollView keyboardShouldPersistTaps="handled" style={styles.hitList}>
+            {placeHits.map((h) => (
+              <TouchableOpacity key={h.id} style={styles.hitItem} onPress={() => flyToHit(h)}>
+                <Text style={styles.hitText} numberOfLines={2}>{h.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : null}
+
+        <View style={styles.locationRow}>
+          <View style={styles.dotIcon} />
+          <View>
+            <Text style={styles.rowLabel}>Pickup Location</Text>
+            <Text style={styles.rowValue}>
+              {pickupLabel?.trim()?.length ? pickupLabel : `${region.latitude.toFixed(4)}, ${region.longitude.toFixed(4)}`}
+            </Text>
           </View>
         </View>
 
-        <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>PIN</Text>
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search pickup location"
-            placeholderTextColor="#6F7785"
-            style={[styles.searchInput, isRTL && styles.textRight]}
-          />
-        </View>
+        <TouchableOpacity 
+          style={styles.terminalSelector}
+          onPress={() => setShowTerminals(!showTerminals)}
+        >
+          <View>
+            <Text style={styles.rowLabel}>Airport Destination</Text>
+            <Text style={styles.rowValue}>{terminal}</Text>
+          </View>
+          <Text style={styles.chevron}>{showTerminals ? '▲' : '▼'}</Text>
+        </TouchableOpacity>
 
-        <Text style={[styles.sectionTitle, isRTL && styles.textRight]}>Popular pickup locations</Text>
-        <FlatList
-          data={filteredLocations}
-          keyExtractor={(item) => item.name}
-          scrollEnabled={false}
-          renderItem={({ item }) => {
-            const selected = pickup?.name === item.name;
-            return (
+        {showTerminals && (
+          <View style={styles.terminalList}>
+            {TERMINALS.map((t) => (
               <TouchableOpacity
-                style={[styles.locationCard, selected && styles.selectedCard]}
-                onPress={() => setPickup(item)}
-                activeOpacity={0.86}
+                key={t}
+                style={[styles.terminalItem, terminal === t && styles.terminalItemSelected]}
+                onPress={() => {
+                  setTerminal(t);
+                  setShowTerminals(false);
+                }}
               >
-                <View style={styles.pinBubble}>
-                  <Text style={styles.pinText}>{selected ? 'OK' : 'CT'}</Text>
-                </View>
-                <View style={styles.cardCopy}>
-                  <Text style={[styles.cardTitle, isRTL && styles.textRight]}>{item.name}</Text>
-                  <Text style={[styles.cardSub, isRTL && styles.textRight]}>
-                    {item.lat.toFixed(4)}, {item.lng.toFixed(4)}
-                  </Text>
-                </View>
+                <Text style={[styles.terminalItemText, terminal === t && styles.terminalItemTextSelected]}>
+                  {t}
+                </Text>
               </TouchableOpacity>
-            );
-          }}
-        />
+            ))}
+          </View>
+        )}
 
-        <View style={styles.terminalPanel}>
-          <Text style={[styles.sectionTitle, isRTL && styles.textRight]}>Airport destination</Text>
-          <Text style={[styles.sectionHint, isRTL && styles.textRight]}>Choose your UAE airport terminal.</Text>
-          {TERMINALS.map((item) => {
-            const selected = terminal === item;
-            return (
-              <TouchableOpacity
-                key={item}
-                style={[styles.terminalChip, selected && styles.terminalChipSelected]}
-                onPress={() => setTerminal(item)}
-              >
-                <Text style={[styles.terminalText, selected && styles.terminalTextSelected]}>{item}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </ScrollView>
-
-      <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.continueButton, (!pickup || isAssigning) && styles.disabledButton]}
-          disabled={!pickup || isAssigning}
+          style={[styles.continueButton, isAssigning && styles.disabledButton]}
+          disabled={isAssigning}
           onPress={handleContinue}
         >
           {isAssigning ? (
             <ActivityIndicator color="#08100A" />
           ) : (
-            <Text style={styles.continueText}>{isRTL ? '<- Continue' : 'Continue ->'}</Text>
+            <Text style={styles.continueText}>Confirm Location →</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -184,36 +254,76 @@ const LocationPickScreen = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  content: { padding: 24, paddingTop: 58, paddingBottom: 130 },
-  header: { flexDirection: 'row', gap: 14, alignItems: 'center', marginBottom: 24 },
-  rtlRow: { flexDirection: 'row-reverse' },
-  backButton: { width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.line },
-  backText: { color: COLORS.text, fontWeight: '900' },
-  headerCopy: { flex: 1 },
-  eyebrow: { color: COLORS.green, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1.2 },
-  title: { color: COLORS.text, fontSize: 30, fontWeight: '900', lineHeight: 36, marginTop: 6 },
-  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.card, borderRadius: 18, paddingHorizontal: 16, borderWidth: 1, borderColor: COLORS.line, marginBottom: 24 },
-  searchIcon: { color: COLORS.green, fontSize: 12, fontWeight: '900' },
-  searchInput: { flex: 1, color: COLORS.text, height: 56, fontSize: 16 },
-  sectionTitle: { color: COLORS.text, fontSize: 17, fontWeight: '800', marginBottom: 10 },
-  sectionHint: { color: COLORS.muted, fontSize: 13, marginTop: -4, marginBottom: 12 },
-  locationCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: COLORS.card, borderRadius: 18, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: COLORS.line },
-  selectedCard: { borderColor: COLORS.green, backgroundColor: '#102015' },
-  pinBubble: { width: 42, height: 42, borderRadius: 14, backgroundColor: COLORS.greenDark, alignItems: 'center', justifyContent: 'center' },
-  pinText: { color: COLORS.green, fontWeight: '900', fontSize: 11 },
-  cardCopy: { flex: 1 },
-  cardTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800' },
-  cardSub: { color: COLORS.muted, fontSize: 12, marginTop: 4 },
-  terminalPanel: { backgroundColor: COLORS.card2, borderRadius: 24, padding: 18, marginTop: 18, borderWidth: 1, borderColor: COLORS.line },
-  terminalChip: { padding: 14, borderRadius: 15, backgroundColor: '#101215', borderWidth: 1, borderColor: COLORS.line, marginTop: 8 },
-  terminalChipSelected: { borderColor: COLORS.green, backgroundColor: COLORS.greenDark },
-  terminalText: { color: COLORS.muted, fontSize: 14, fontWeight: '700' },
-  terminalTextSelected: { color: COLORS.text },
-  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 24, backgroundColor: '#0A0A0BEE', borderTopWidth: 1, borderTopColor: COLORS.line },
+  map: { width, height: height * 0.7 },
+  centerPinContainer: {
+    position: 'absolute',
+    top: (height * 0.7) / 2 - 40,
+    left: width / 2 - 20,
+    alignItems: 'center',
+  },
+  pinBubble: { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.green, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5 },
+  pinText: { color: '#000', fontWeight: '900', fontSize: 14 },
+  pinStem: { width: 4, height: 16, backgroundColor: '#000', marginTop: -2 },
+  pinShadow: { width: 12, height: 4, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.3)', marginTop: -2 },
+  headerOverlay: { position: 'absolute', top: 58, left: 24, right: 24, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  backButton: { width: 44, height: 44, borderRadius: 14, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.line, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8 },
+  backText: { color: COLORS.text, fontWeight: '900', fontSize: 18 },
+  headerTextContainer: { flex: 1, backgroundColor: 'rgba(10, 10, 11, 0.85)', padding: 10, borderRadius: 14, borderWidth: 1, borderColor: COLORS.line },
+  headerEyebrow: { color: COLORS.green, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+  headerTitle: { color: COLORS.text, fontSize: 16, fontWeight: '900' },
+  bottomSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.card, borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 24, paddingBottom: 40, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 10 },
+  sheetHandle: { width: 40, height: 5, borderRadius: 3, backgroundColor: COLORS.line, alignSelf: 'center', marginBottom: 14 },
+  searchPrompt: { color: COLORS.text, fontSize: 13, fontWeight: '900', marginBottom: 10 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#101215',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  searchField: { flex: 1, paddingVertical: 12, color: COLORS.text, fontWeight: '600' },
+  hitList: { maxHeight: 130, marginBottom: 12 },
+  hitItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  hitText: { color: COLORS.text, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  dotIcon: { width: 12, height: 12, borderRadius: 6, backgroundColor: COLORS.green },
+  rowLabel: { color: COLORS.muted, fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  rowValue: { color: COLORS.text, fontSize: 16, fontWeight: '800' },
+  terminalSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#101215', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: COLORS.line, marginBottom: 16 },
+  chevron: { color: COLORS.muted, fontSize: 14 },
+  terminalList: { backgroundColor: '#101215', borderRadius: 16, borderWidth: 1, borderColor: COLORS.line, marginBottom: 16, overflow: 'hidden' },
+  terminalItem: { padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  terminalItemSelected: { backgroundColor: COLORS.greenDark },
+  terminalItemText: { color: COLORS.muted, fontSize: 14, fontWeight: '700' },
+  terminalItemTextSelected: { color: COLORS.green, fontWeight: '800' },
   continueButton: { backgroundColor: COLORS.green, borderRadius: 18, paddingVertical: 18, alignItems: 'center' },
-  disabledButton: { opacity: 0.45 },
-  continueText: { color: '#08100A', fontWeight: '900', fontSize: 16 },
-  textRight: { textAlign: 'right' },
+  disabledButton: { opacity: 0.5 },
+  continueText: { color: '#000', fontWeight: '900', fontSize: 16 },
 });
+
+const mapStyle = [
+  { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
+  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#263c3f' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#6b9a76' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#38414e' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#212a37' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#9ca5b3' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#746855' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1f2835' }] },
+  { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#f3d19c' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#2f3948' }] },
+  { featureType: 'transit.station', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#17263c' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#515c6d' }] },
+  { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#17263c' }] },
+];
 
 export default LocationPickScreen;

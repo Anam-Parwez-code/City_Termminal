@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
+import theme from '../theme';
 
 const VerificationScreen = ({ navigation, route }) => {
   const { t, i18n } = useTranslation();
@@ -79,7 +80,7 @@ const VerificationScreen = ({ navigation, route }) => {
 
     // Chhota delay — loading dikhao — phir navigate
     setTimeout(() => {
-      navigation.navigate('SlotBooking', {
+      navigation.navigate('LocationPick', {
         bookingId,
         airline,
         bookingData: {
@@ -225,41 +226,41 @@ const VerificationScreen = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-  keyboardView: { flex: 1, backgroundColor: '#0F0F10' },
-  container: { flex: 1, backgroundColor: '#0F0F10', paddingHorizontal: 24 },
+  keyboardView: { flex: 1, backgroundColor: theme.colors.white },
+  container: { flex: 1, backgroundColor: theme.colors.white, paddingHorizontal: 24 },
   contentContainer: { paddingBottom: 24 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 60, marginBottom: 24 },
-  backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1A1A1D', alignItems: 'center', justifyContent: 'center', shadowColor: '#EF3340', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 3 },
-  backArrow: { fontSize: 20, color: '#F8FAFC' },
-  stepBadge: { backgroundColor: '#163A1C', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  stepText: { fontSize: 12, fontWeight: '600', color: '#D7F6DF' },
+  backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: theme.colors.cardMuted, alignItems: 'center', justifyContent: 'center', shadowColor: theme.colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  backArrow: { fontSize: 20, color: theme.colors.black },
+  stepBadge: { backgroundColor: theme.colors.cardMuted, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  stepText: { fontSize: 12, fontWeight: '600', color: theme.colors.black },
   titleArea: { marginBottom: 24 },
-  title: { fontSize: 26, fontWeight: '800', color: '#F8FAFC', marginBottom: 8 },
-  subtitle: { fontSize: 14, color: '#CBD5E1', lineHeight: 20 },
+  title: { fontSize: 26, fontWeight: '800', color: theme.colors.black, marginBottom: 8 },
+  subtitle: { fontSize: 14, color: theme.colors.muted, lineHeight: 20 },
   passportImageContainer: { marginBottom: 24, borderRadius: 16, overflow: 'hidden', position: 'relative' },
   passportThumbnail: { width: '100%', height: 160, borderRadius: 16 },
-  aiTag: { position: 'absolute', top: 12, right: 12, backgroundColor: 'rgba(239,51,64,0.85)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  aiTagText: { fontSize: 11, color: '#FFFFFF', fontWeight: '600' },
+  aiTag: { position: 'absolute', top: 12, right: 12, backgroundColor: theme.colors.careemGreen, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  aiTagText: { fontSize: 11, color: theme.colors.white, fontWeight: '600' },
   section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#F8FAFC', marginBottom: 12 },
-  fieldContainer: { backgroundColor: '#191A1E', borderRadius: 14, padding: 16, marginBottom: 8, shadowColor: '#EF3340', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 4, elevation: 2, borderWidth: 1, borderColor: '#2E3138' },
-  fieldLabel: { fontSize: 11, fontWeight: '600', color: '#94A3B8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.black, marginBottom: 12 },
+  fieldContainer: { backgroundColor: theme.colors.cardMuted, borderRadius: 14, padding: 16, marginBottom: 8, shadowColor: theme.colors.black, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2, borderWidth: 1, borderColor: 'transparent' },
+  fieldLabel: { fontSize: 11, fontWeight: '600', color: theme.colors.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
   fieldRow: { flexDirection: 'row', alignItems: 'center' },
-  fieldValue: { flex: 1, fontSize: 16, fontWeight: '500', color: '#F8FAFC' },
-  fieldInput: { flex: 1, fontSize: 16, fontWeight: '500', color: '#F8FAFC', borderBottomWidth: 1.5, borderBottomColor: '#009A44', paddingVertical: 4 },
-  editButton: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#2B2F36', alignItems: 'center', justifyContent: 'center' },
-  editButtonText: { fontSize: 14, color: '#7EE08D' },
-  flightCard: { backgroundColor: '#191A1E', borderRadius: 16, padding: 20, shadowColor: '#EF3340', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 3, borderWidth: 1, borderColor: '#2E3138' },
+  fieldValue: { flex: 1, fontSize: 16, fontWeight: '500', color: theme.colors.black },
+  fieldInput: { flex: 1, fontSize: 16, fontWeight: '500', color: theme.colors.black, borderBottomWidth: 1.5, borderBottomColor: theme.colors.careemGreen, paddingVertical: 4 },
+  editButton: { width: 32, height: 32, borderRadius: 8, backgroundColor: theme.colors.white, alignItems: 'center', justifyContent: 'center' },
+  editButtonText: { fontSize: 14, color: theme.colors.careemGreen },
+  flightCard: { backgroundColor: theme.colors.cardMuted, borderRadius: 16, padding: 20, shadowColor: theme.colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3, borderWidth: 1, borderColor: 'transparent' },
   flightRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
-  flightLabel: { fontSize: 13, color: '#A7B0C0' },
-  flightValue: { fontSize: 15, fontWeight: '600', color: '#F8FAFC' },
-  divider: { height: 0.5, backgroundColor: '#2E3138' },
+  flightLabel: { fontSize: 13, color: theme.colors.muted },
+  flightValue: { fontSize: 15, fontWeight: '600', color: theme.colors.black },
+  divider: { height: 0.5, backgroundColor: theme.colors.line },
   bottomArea: { gap: 12, paddingBottom: 40 },
-  confirmButton: { backgroundColor: '#EF3340', borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
-  confirmDisabled: { backgroundColor: '#9CA3AF' },
-  confirmText: { fontSize: 17, fontWeight: '700', color: '#FFFFFF' },
+  confirmButton: { backgroundColor: theme.colors.careemGreen, borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
+  confirmDisabled: { backgroundColor: theme.colors.muted },
+  confirmText: { fontSize: 17, fontWeight: '700', color: theme.colors.white },
   rescanButton: { alignItems: 'center', paddingVertical: 8 },
-  rescanText: { fontSize: 14, color: '#7EE08D', textDecorationLine: 'underline' },
+  rescanText: { fontSize: 14, color: theme.colors.careemGreen, textDecorationLine: 'underline' },
   textRight: { textAlign: 'right' },
 });
 

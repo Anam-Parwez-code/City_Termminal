@@ -8,7 +8,14 @@ const normalizeStatus = (status) => String(status || '').trim().toLowerCase();
 
 const isArrived = (status) => {
   const value = normalizeStatus(status);
-  return value === 'arrived' || value === 'at terminal' || value === 'airport terminal';
+  const atAir =
+    value === 'arrived' ||
+    value === 'at terminal' ||
+    value === 'airport terminal' ||
+    value === 'at_airport' ||
+    value.includes('at airport') ||
+    value.includes('reached_airport');
+  return atAir;
 };
 
 const playTerminalSound = () => {
@@ -228,6 +235,9 @@ const OperationsDashboard = ({ auth, onLogout }) => {
                 <th>Proof QR</th>
                 <th>Vehicle</th>
                 <th>Vehicle Status</th>
+                <th>Trip Ops</th>
+                <th>Driver Phone</th>
+                <th>Luggage Barcode</th>
                 <th>Destination</th>
                 <th>Departure</th>
                 <th>Flight Status</th>
@@ -246,6 +256,15 @@ const OperationsDashboard = ({ auth, onLogout }) => {
                 <td>{p.proof_qr_code ? <span className="arrival-chip">Generated</span> : '--'}</td>
                 <td>{p.vehicle_number || '--'}</td>
                 <td>{p.vehicle_status || p.current_location || '--'}</td>
+                <td>{p.trip_assignment_status || '--'}</td>
+                <td>{p.assignment_driver_phone || '--'}</td>
+                <td className="qr-cell" title={p.luggage_barcode_payload || ''}>
+                  {p.luggage_barcode_payload
+                    ? String(p.luggage_barcode_payload).length > 52
+                      ? `${String(p.luggage_barcode_payload).slice(0, 52)}…`
+                      : String(p.luggage_barcode_payload)
+                    : '--'}
+                </td>
                 <td>{p.destination || '--'}</td>
                 <td>{p.departure_time || '--'}</td>
                 <td>{p.flight_status || '--'}</td>

@@ -20,6 +20,17 @@ const BASE_URL = 'http://192.168.245.224:5000/api';
 //                    ^^^^^^^^^^^ Yahan apna IP daalo
 const AI_BASE_URL = 'http://192.168.245.224:8000';
 
+export const getSocketBaseUrl = () => {
+  const trimmed = BASE_URL.replace(/\/api\/?$/i, '').trim();
+  if (trimmed) return trimmed;
+  try {
+    const u = new URL(BASE_URL);
+    return `${u.origin}`;
+  } catch {
+    return 'http://localhost:5000';
+  }
+};
+
 // ── AXIOS INSTANCE ────────────────────────────────────────
 const api = axios.create({
   baseURL: BASE_URL,
@@ -194,6 +205,16 @@ const apiService = {
       bookingId,
       vehicleId,
     });
+    return result;
+  },
+
+  startAirportTrip: async ({ bookingId }) => {
+    const result = await api.post('/otp/airport-trip', { bookingId });
+    return result;
+  },
+
+  updateDriverGPS: async ({ bookingId, vehicleId, lat, lng }) => {
+    const result = await api.put('/otp/driver-location', { bookingId, vehicleId, lat, lng });
     return result;
   },
 

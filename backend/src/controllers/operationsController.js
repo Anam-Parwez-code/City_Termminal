@@ -67,6 +67,32 @@ const getLiveVehicles = async (_req, res) => {
 const getPassengerList = async (req, res) => {
   const { q = '' } = req.query;
 
+  await safeQuery(
+    `
+    CREATE TABLE IF NOT EXISTS vehicle_assignments (
+      id SERIAL PRIMARY KEY,
+      booking_id VARCHAR(20) NOT NULL,
+      vehicle_id VARCHAR(20) NOT NULL,
+      driver_name VARCHAR(100),
+      driver_phone VARCHAR(20),
+      barcode_data TEXT,
+      vehicle_verified BOOLEAN DEFAULT false,
+      barcode_scanned BOOLEAN DEFAULT false,
+      status VARCHAR(30) DEFAULT 'dispatched',
+      current_location VARCHAR(100),
+      pickup_location VARCHAR(100),
+      destination_terminal VARCHAR(50),
+      reached_pickup BOOLEAN DEFAULT false,
+      reached_airport BOOLEAN DEFAULT false,
+      luggage_tagged BOOLEAN DEFAULT false,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `,
+    [],
+    []
+  );
+
   await safeQuery(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS status VARCHAR(40) DEFAULT 'confirmed'`);
   await safeQuery(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS departure_time VARCHAR(80)`);
   await safeQuery(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS destination VARCHAR(120)`);
@@ -86,11 +112,16 @@ const getPassengerList = async (req, res) => {
       sb.qr_code,
       vt.status AS vehicle_status,
       vt.current_location,
-      b.status AS flight_status
+      b.status AS flight_status,
+      va.barcode_data AS luggage_barcode_payload,
+      va.driver_phone AS assignment_driver_phone,
+      va.driver_name AS assignment_driver_name,
+      va.status AS trip_assignment_status
     FROM bookings b
     LEFT JOIN slot_bookings sb ON UPPER(sb.booking_id) = UPPER(b.booking_id)
     LEFT JOIN slots s ON s.id = sb.slot_id
     LEFT JOIN vehicle_tracking vt ON UPPER(vt.booking_id) = UPPER(b.booking_id)
+    LEFT JOIN vehicle_assignments va ON UPPER(va.booking_id) = UPPER(b.booking_id)
     WHERE b.passenger_name ILIKE $1 OR b.booking_id ILIKE $1 OR b.flight_number ILIKE $1
     ORDER BY b.created_at DESC
     LIMIT 500`,
@@ -114,11 +145,16 @@ const getPassengerList = async (req, res) => {
         sb.qr_code,
         vt.status AS vehicle_status,
         vt.current_location,
-        COALESCE(b.status, sb.status, 'confirmed') AS flight_status
+        COALESCE(b.status, sb.status, 'confirmed') AS flight_status,
+        va.barcode_data AS luggage_barcode_payload,
+        va.driver_phone AS assignment_driver_phone,
+        va.driver_name AS assignment_driver_name,
+        va.status AS trip_assignment_status
       FROM slot_bookings sb
       LEFT JOIN bookings b ON UPPER(b.booking_id) = UPPER(sb.booking_id)
       LEFT JOIN slots s ON s.id = sb.slot_id
       LEFT JOIN vehicle_tracking vt ON UPPER(vt.booking_id) = UPPER(sb.booking_id)
+      LEFT JOIN vehicle_assignments va ON UPPER(va.booking_id) = UPPER(sb.booking_id)
       WHERE sb.booking_id ILIKE $1
       ORDER BY sb.created_at DESC
       LIMIT 50`,

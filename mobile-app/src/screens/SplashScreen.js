@@ -16,7 +16,7 @@ const SplashScreen = ({ navigation }) => {
     }).start();
 
     const timer = setTimeout(() => {
-      navigation.replace('Auth');
+      navigation.replace('LanguageSelect');
     }, 2200);
 
     return () => clearTimeout(timer);
