@@ -20,10 +20,15 @@ import BookingEntryScreen from '../screens/BookingEntryScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import SlotBookingScreen from '../screens/SlotBookingScreen';
 import ConfirmationScreen from '../screens/ConfirmationScreen';
+import LocationPickScreen from '../screens/LocationPickScreen';
+import BookingConfirmScreen from '../screens/BookingConfirmScreen';
+import BarcodeScreen from '../screens/BarcodeScreen';
 import LiveTrackingScreen from '../screens/LiveTrackingScreen';
+import TrackingScreen from '../screens/TrackingScreen';
 import ArrivedScreen from '../screens/ArrivedScreen';
 import ChatSupportScreen from '../screens/ChatSupportScreen';
 import AdminDashboardScreen from '../screens/AdminDashboardScreen';
+import theme from '../theme';
 
 // Stack navigator create karo
 // Stack = stack of screens — jaise cards ka dhair
@@ -87,9 +92,14 @@ const AppNavigator = () => {
           <Stack.Screen name="PassportScan" component={PassportScanScreen} />
           <Stack.Screen name="Verification" component={VerificationScreen} />
           <Stack.Screen name="SlotBooking" component={SlotBookingScreen} />
+          <Stack.Screen name="LocationPick" component={LocationPickScreen} />
+          <Stack.Screen name="BookingConfirm" component={BookingConfirmScreen} />
+          <Stack.Screen name="Barcode" component={BarcodeScreen} />
           <Stack.Screen name="Confirmation" component={ConfirmationScreen} />
           <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
+          <Stack.Screen name="Tracking" component={TrackingScreen} />
           <Stack.Screen name="Arrived" component={ArrivedScreen} />
+          <Stack.Screen name="ArrivedScreen" component={ArrivedScreen} />
           <Stack.Screen name="ChatSupport" component={ChatSupportScreen} />
           <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
         </Stack.Navigator>
@@ -145,9 +155,9 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#191A1E',
+    backgroundColor: theme.colors.black,
     borderWidth: 1,
-    borderColor: '#2E3138',
+    borderColor: theme.colors.black,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 30,
@@ -159,21 +169,21 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: '#009A44',
+    backgroundColor: theme.colors.careemGreen,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 30,
     elevation: 4,
   },
-  fabIcon: { color: '#F8FAFC', fontSize: 24, marginTop: -2 },
+  fabIcon: { color: theme.colors.white, fontSize: 24, marginTop: -2 },
   chatIcon: { fontSize: 26 },
   menuCard: {
     position: 'absolute',
     top: 108,
     left: 16,
-    backgroundColor: '#191A1E',
+    backgroundColor: theme.colors.black,
     borderWidth: 1,
-    borderColor: '#2E3138',
+    borderColor: theme.colors.black,
     borderRadius: 12,
     minWidth: 170,
     zIndex: 40,
@@ -183,12 +193,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#2E3138',
+    borderBottomColor: '#1F2937',
   },
   menuItemLast: {
     borderBottomWidth: 0,
   },
-  menuText: { color: '#F8FAFC', fontSize: 14, fontWeight: '600' },
+  menuText: { color: theme.colors.white, fontSize: 14, fontWeight: '600' },
 });
 
 export default AppNavigator;

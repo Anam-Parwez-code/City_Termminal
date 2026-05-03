@@ -25,6 +25,7 @@ import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 
 import apiService from '../services/apiService';
 import { useTranslation } from 'react-i18next';
+import theme from '../theme';
 
 const { width } = Dimensions.get('window');
 
@@ -172,7 +173,7 @@ const PassportScanScreen = ({ navigation, route }) => {
   if (!permission) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#EF3340" />
+        <ActivityIndicator size="large" color={theme.colors.careemGreen} />
       </View>
     );
   }
@@ -213,7 +214,7 @@ const PassportScanScreen = ({ navigation, route }) => {
       {scanStep === 'processing' && (
         <View style={styles.processingOverlay}>
           <View style={styles.processingCard}>
-            <ActivityIndicator size="large" color="#EF3340" />
+            <ActivityIndicator size="large" color={theme.colors.careemGreen} />
             <Text style={styles.processingTitle}>{t('verification.passportInfo')}</Text>
             <Text style={styles.processingSubtitle}>
               {t('verification.subtitle')}
@@ -342,22 +343,22 @@ const PassportScanScreen = ({ navigation, route }) => {
 // ============================================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
-  centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F10' },
+  centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.white },
 
   permissionContainer: {
-    flex: 1, backgroundColor: '#0F0F10',
+    flex: 1, backgroundColor: theme.colors.white,
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32,
   },
-  permissionTitle: { fontSize: 24, fontWeight: '700', color: '#F8FAFC', marginBottom: 16, textAlign: 'center' },
-  permissionText: { fontSize: 14, color: '#CBD5E1', textAlign: 'center', lineHeight: 22, marginBottom: 32 },
+  permissionTitle: { fontSize: theme.fontSizes.xl, fontWeight: '900', color: theme.colors.black, marginBottom: 16, textAlign: 'center' },
+  permissionText: { fontSize: 14, color: theme.colors.muted, textAlign: 'center', lineHeight: 22, marginBottom: 32 },
   permissionButton: {
-    backgroundColor: '#EF3340', paddingVertical: 16,
-    paddingHorizontal: 32, borderRadius: 14,
+    backgroundColor: theme.colors.careemGreen, paddingVertical: 18,
+    paddingHorizontal: 32, borderRadius: theme.radii.button,
     marginBottom: 12, width: '100%', alignItems: 'center',
   },
   permissionButtonText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
   skipButton: { paddingVertical: 12 },
-  skipText: { fontSize: 14, color: '#A7B0C0', textDecorationLine: 'underline' },
+  skipText: { fontSize: 14, color: theme.colors.black, textDecorationLine: 'underline', fontWeight: '700' },
 
   camera: { flex: 1 },
   overlay: { flex: 1, backgroundColor: 'transparent', justifyContent: 'space-between' },
@@ -380,14 +381,14 @@ const styles = StyleSheet.create({
 
   frameArea: { alignItems: 'center', justifyContent: 'center', flex: 1 },
   frame: { width: width * 0.85, height: width * 0.6, position: 'relative' },
-  corner: { position: 'absolute', width: 30, height: 30, borderColor: '#EF3340', borderWidth: 3 },
+  corner: { position: 'absolute', width: 30, height: 30, borderColor: theme.colors.careemGreen, borderWidth: 3 },
   topLeft:    { top: 0, left: 0,   borderRightWidth: 0, borderBottomWidth: 0 },
   topRight:   { top: 0, right: 0,  borderLeftWidth: 0,  borderBottomWidth: 0 },
   bottomLeft: { bottom: 0, left: 0,  borderRightWidth: 0, borderTopWidth: 0 },
   bottomRight:{ bottom: 0, right: 0, borderLeftWidth: 0,  borderTopWidth: 0 },
   scanLine: {
     position: 'absolute', top: '50%', left: 10, right: 10,
-    height: 2, backgroundColor: 'rgba(239, 51, 64, 0.75)',
+    height: 2, backgroundColor: 'rgba(71, 211, 97, 0.75)',
   },
 
   instructionsArea: {
@@ -399,11 +400,11 @@ const styles = StyleSheet.create({
   instructionItem: { fontSize: 13, color: 'rgba(255,255,255,0.8)', lineHeight: 18 },
 
   gallerySecondaryButton: {
-    backgroundColor: '#191A1E', paddingVertical: 10,
+    backgroundColor: theme.colors.cardMuted, paddingVertical: 12,
     paddingHorizontal: 20, borderRadius: 10,
     marginBottom: 20, alignItems: 'center',
   },
-  gallerySecondaryText: { color: '#7EE08D', fontWeight: '600', fontSize: 14 },
+  gallerySecondaryText: { color: theme.colors.black, fontWeight: '800', fontSize: 14 },
 
   captureButton: { marginBottom: 12 },
   captureOuter: {
@@ -428,13 +429,13 @@ const styles = StyleSheet.create({
   confirmTitle: { fontSize: 16, fontWeight: '600', color: '#FFFFFF', marginBottom: 6 },
   confirmSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.6)' },
 
-  actionButtons: { flexDirection: 'row', gap: 12, padding: 20, backgroundColor: '#000000' },
+  actionButtons: { flexDirection: 'row', gap: 12, padding: 20, backgroundColor: theme.colors.black },
   retakeButton: {
     flex: 1, paddingVertical: 16, borderRadius: 14,
     borderWidth: 1.5, borderColor: '#FFFFFF', alignItems: 'center',
   },
   retakeText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
-  confirmButton: { flex: 2, paddingVertical: 16, borderRadius: 14, backgroundColor: '#EF3340', alignItems: 'center' },
+  confirmButton: { flex: 2, paddingVertical: 16, borderRadius: theme.radii.button, backgroundColor: theme.colors.careemGreen, alignItems: 'center' },
   confirmDisabled: { backgroundColor: '#9CA3AF' },
   confirmText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
 
@@ -444,11 +445,11 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', zIndex: 999,
   },
   processingCard: {
-    backgroundColor: '#191A1E', borderRadius: 20, padding: 32,
+    backgroundColor: theme.colors.white, borderRadius: theme.radii.card, padding: 32,
     alignItems: 'center', width: width * 0.8, gap: 16,
   },
-  processingTitle: { fontSize: 20, fontWeight: '700', color: '#F8FAFC' },
-  processingSubtitle: { fontSize: 13, color: '#CBD5E1', textAlign: 'center', lineHeight: 20 },
+  processingTitle: { fontSize: 20, fontWeight: '900', color: theme.colors.black },
+  processingSubtitle: { fontSize: 13, color: theme.colors.muted, textAlign: 'center', lineHeight: 20 },
 });
 
 export default PassportScanScreen;

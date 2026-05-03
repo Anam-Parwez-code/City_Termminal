@@ -9,7 +9,7 @@
 // QR Code + Confirmation Screen pe jaayega
 // ============================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,11 +19,13 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Animated,
 } from 'react-native';
 
 import apiService from '../services/apiService';
 import adminService from '../services/adminService';
 import { useTranslation } from 'react-i18next';
+import theme from '../theme';
 
 // ============================================================
 // HELPER — Time format karo
@@ -135,19 +137,29 @@ const SlotBookingScreen = ({ navigation, route }) => {
   const isRTL = i18n.dir() === 'rtl';
 
   // ── ROUTE PARAMS ─────────────────────────────────────────
-  const { bookingId, airline, bookingData } = route.params;
-  const resolvedBookingId = bookingData?.bookingId || bookingId;
+  const { bookingId, airline, bookingData } = route.params || {};
+  const resolvedBookingId = bookingId || bookingData?.bookingId || bookingData?.booking_id;
 
   // ── STATES ───────────────────────────────────────────────
   const [slots, setSlots] = useState([]);           // Available slots
   const [selectedSlot, setSelectedSlot] = useState(null); // Chosen slot
   const [isLoadingSlots, setIsLoadingSlots] = useState(true); // Slots load ho raha
   const [isBooking, setIsBooking] = useState(false); // Booking API chal raha
+  const sheetAnim = useRef(new Animated.Value(0)).current;
 
   // ── FETCH SLOTS — Screen load hone pe ───────────────────
   useEffect(() => {
     fetchAvailableSlots();
   }, []); // [] = sirf ek baar
+
+  useEffect(() => {
+    Animated.spring(sheetAnim, {
+      toValue: selectedSlot ? 1 : 0,
+      damping: 18,
+      stiffness: 120,
+      useNativeDriver: true,
+    }).start();
+  }, [selectedSlot, sheetAnim]);
 
   const fetchAvailableSlots = async () => {
     setIsLoadingSlots(true);
@@ -195,12 +207,11 @@ const SlotBookingScreen = ({ navigation, route }) => {
 
               await adminService.saveCurrentBookingId(resolvedBookingId);
 
-              // Confirmation + QR Screen pe jaao
-              navigation.navigate('Confirmation', {
+              navigation.navigate('LocationPick', {
                 bookingId: resolvedBookingId,
                 airline,
                 bookingData,
-                confirmation: result.confirmation, // Vehicle, QR, slot details
+                confirmation: result.confirmation,
               });
 
             } catch (error) {
@@ -256,7 +267,7 @@ const SlotBookingScreen = ({ navigation, route }) => {
       {isLoadingSlots ? (
         // Loading state
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#EF3340" />
+          <ActivityIndicator size="large" color={theme.colors.careemGreen} />
           <Text style={styles.loadingText}>{t('slotBooking.loadingSlots')}</Text>
         </View>
 
@@ -295,7 +306,20 @@ const SlotBookingScreen = ({ navigation, route }) => {
 
       {/* ── BOTTOM BUTTON ── */}
       {!isLoadingSlots && slots.length > 0 && (
-        <View style={styles.bottomArea}>
+        <Animated.View
+          style={[
+            styles.bottomArea,
+            {
+              transform: [{
+                translateY: sheetAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [18, 0],
+                }),
+              }],
+            },
+          ]}
+        >
+          <View style={styles.sheetHandle} />
 
           {/* Selected slot summary */}
           {selectedSlot && (
@@ -323,7 +347,7 @@ const SlotBookingScreen = ({ navigation, route }) => {
             )}
           </TouchableOpacity>
 
-        </View>
+        </Animated.View>
       )}
 
     </View>
@@ -337,7 +361,7 @@ const styles = StyleSheet.create({
 
   container: {
     flex: 1,
-    backgroundColor: '#0F0F10',
+    backgroundColor: '#0A0A0B',
     paddingHorizontal: 24,
   },
 
@@ -352,17 +376,17 @@ const styles = StyleSheet.create({
   backButton: {
     width: 44, height: 44,
     borderRadius: 12,
-    backgroundColor: '#1A1A1D',
+    backgroundColor: '#15171B',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#EF3340',
+    shadowColor: theme.colors.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 3,
   },
 
-  backArrow: { fontSize: 20, color: '#F8FAFC' },
+  backArrow: { fontSize: 20, color: theme.colors.white },
 
   stepBadge: {
     backgroundColor: '#163A1C',
@@ -371,30 +395,30 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
 
-  stepText: { fontSize: 12, fontWeight: '600', color: '#D7F6DF' },
+  stepText: { fontSize: 12, fontWeight: '800', color: '#D7F6DF' },
 
   titleArea: { marginBottom: 16 },
 
   title: {
-    fontSize: 26, fontWeight: '800',
-    color: '#F8FAFC', marginBottom: 8,
+    fontSize: theme.fontSizes.title, fontWeight: '900',
+    color: theme.colors.white, marginBottom: 8,
   },
 
-  subtitle: { fontSize: 14, color: '#CBD5E1', lineHeight: 20 },
+  subtitle: { fontSize: 14, color: '#A7B0C0', lineHeight: 20 },
 
   // Flight reminder
   flightReminder: {
-    backgroundColor: '#1F2A21',
+    backgroundColor: '#15171B',
     borderRadius: 12,
     padding: 14,
     marginBottom: 20,
     borderLeftWidth: 3,
-    borderLeftColor: '#009A44',
+    borderLeftColor: theme.colors.careemGreen,
   },
 
-  reminderText: { fontSize: 13, color: '#D1FAE5' },
+  reminderText: { fontSize: 13, color: theme.colors.white },
   reminderBold: { fontWeight: '700' },
-  reminderNote: { fontSize: 11, color: '#A7F3D0', marginTop: 4 },
+  reminderNote: { fontSize: 11, color: '#A7B0C0', marginTop: 4 },
 
   // Loading
   loadingContainer: {
@@ -411,12 +435,12 @@ const styles = StyleSheet.create({
   },
 
   emptyIcon: { fontSize: 48, marginBottom: 8 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: '#F8FAFC' },
+  emptyTitle: { fontSize: 18, fontWeight: '900', color: theme.colors.white },
   emptySubtitle: { fontSize: 14, color: '#A7B0C0' },
 
   retryButton: {
     marginTop: 16,
-    backgroundColor: '#EF3340',
+    backgroundColor: theme.colors.careemGreen,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
@@ -426,19 +450,19 @@ const styles = StyleSheet.create({
 
   // Slot list
   slotList: { flex: 1 },
-  listContent: { paddingBottom: 16 },
+  listContent: { paddingBottom: 180 },
 
   // Slot card
   slotCard: {
-    backgroundColor: '#191A1E',
+    backgroundColor: '#15171B',
     borderRadius: 16,
     padding: 16,
     marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#2E3138',
-    shadowColor: '#EF3340',
+    borderColor: 'transparent',
+    shadowColor: theme.colors.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 6,
@@ -446,19 +470,19 @@ const styles = StyleSheet.create({
   },
 
   slotCardSelected: {
-    borderColor: '#009A44',
-    backgroundColor: '#1F2A21',
+    borderColor: theme.colors.careemGreen,
+    backgroundColor: '#101215',
   },
 
   slotCardFull: {
-    backgroundColor: '#252830',
+    backgroundColor: '#15171B',
     opacity: 0.6,
   },
 
   slotTime: { width: 70, marginRight: 12 },
 
   slotTimeText: {
-    fontSize: 16, fontWeight: '700', color: '#F8FAFC',
+    fontSize: 16, fontWeight: '900', color: theme.colors.white,
   },
 
   slotDateText: { fontSize: 11, color: '#A7B0C0', marginTop: 2 },
@@ -466,11 +490,11 @@ const styles = StyleSheet.create({
   slotLocation: { flex: 1, marginRight: 8 },
 
   slotLocationName: {
-    fontSize: 14, fontWeight: '600', color: '#F8FAFC',
+    fontSize: 14, fontWeight: '800', color: theme.colors.white,
   },
 
   slotLocationAddress: {
-    fontSize: 11, color: '#94A3B8', marginTop: 2,
+    fontSize: 11, color: '#A7B0C0', marginTop: 2,
   },
 
   slotSeats: {
@@ -479,12 +503,12 @@ const styles = StyleSheet.create({
   },
 
   seatCount: {
-    fontSize: 22, fontWeight: '800', color: '#F8FAFC',
+    fontSize: 22, fontWeight: '900', color: theme.colors.white,
   },
 
   seatCountLow: { color: '#EF4444' },
 
-  seatLabel: { fontSize: 10, color: '#94A3B8' },
+  seatLabel: { fontSize: 10, color: '#A7B0C0' },
 
   fullBadge: {
     backgroundColor: '#2B2F36',
@@ -499,33 +523,52 @@ const styles = StyleSheet.create({
     marginTop: 4,
     width: 20, height: 20,
     borderRadius: 10,
-    backgroundColor: '#009A44',
+    backgroundColor: theme.colors.careemGreen,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   checkmarkText: { color: '#FFF', fontSize: 11, fontWeight: 'bold' },
 
-  selectedText: { color: '#7EE08D' },
-  selectedSubText: { color: '#B4F5C4' },
+  selectedText: { color: theme.colors.white },
+  selectedSubText: { color: '#A7B0C0' },
 
   // Bottom
   bottomArea: {
-    paddingVertical: 16,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#111316',
+    borderTopLeftRadius: theme.radii.sheet,
+    borderTopRightRadius: theme.radii.sheet,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 22,
     gap: 10,
+    ...theme.shadows.card,
+  },
+
+  sheetHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#2E3138',
+    alignSelf: 'center',
+    marginBottom: 4,
   },
 
   selectedSummary: {
-    backgroundColor: '#1F2A21',
+    backgroundColor: '#191A1E',
     borderRadius: 12,
     padding: 12,
   },
 
-  summaryText: { fontSize: 13, color: '#D1FAE5', fontWeight: '500' },
+  summaryText: { fontSize: 13, color: theme.colors.white, fontWeight: '800' },
 
   bookButton: {
-    backgroundColor: '#EF3340',
-    borderRadius: 16,
+    backgroundColor: theme.colors.careemGreen,
+    borderRadius: theme.radii.button,
     paddingVertical: 18,
     alignItems: 'center',
   },
@@ -533,7 +576,7 @@ const styles = StyleSheet.create({
   bookButtonDisabled: { backgroundColor: '#9CA3AF' },
 
   bookButtonText: {
-    fontSize: 16, fontWeight: '700', color: '#FFFFFF',
+    fontSize: 16, fontWeight: '900', color: theme.colors.white,
   },
   textRight: {
     textAlign: 'right',

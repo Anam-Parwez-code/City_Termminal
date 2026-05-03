@@ -21,11 +21,9 @@ import {
   Dimensions,
 } from 'react-native';
 
-// QR Code library
-// Install: expo install react-native-qrcode-svg
-// Yeh svg format mein QR banata hai
-import QRCode from 'react-native-qrcode-svg';
 import { useTranslation } from 'react-i18next';
+import QRCodeBox from '../components/QRCodeBox';
+import theme from '../theme';
 
 const { width } = Dimensions.get('window');
 
@@ -167,16 +165,7 @@ const ConfirmationScreen = ({ navigation, route }) => {
           {/* QR Code component */}
           {/* qrData = booking details as JSON string */}
           {/* Scanner is QR ko padhke sab details nikaal lega */}
-          <QRCode
-            value={qrData}           // QR mein encode karna hai yeh
-            size={width * 0.55}      // Screen width ka 55%
-            color="#101113"
-            backgroundColor="#FFFFFF" // Background white
-            getRef={qrRef}           // Save karne ke liye ref
-            logo={undefined}         // Logo add kar sakte ho
-            logoSize={40}
-            logoBackgroundColor="#FFFFFF"
-          />
+          <QRCodeBox value={qrData} size={width * 0.55} />
 
           {/* QR Code ke neeche flight info */}
           <View style={styles.qrInfo}>
@@ -229,6 +218,23 @@ const ConfirmationScreen = ({ navigation, route }) => {
             icon="🚗"
             label={t('confirmation.vehicleNumber')}
             value={confirmation?.vehicleNumber || '--'}
+          />
+
+          <View style={styles.divider} />
+
+          <InfoRow
+            icon="OTP"
+            label="Pickup OTP"
+            value={confirmation?.pickupOtp || confirmation?.pickup_otp || '--'}
+            highlight={true}
+          />
+
+          <View style={styles.divider} />
+
+          <InfoRow
+            icon="DR"
+            label="Driver"
+            value={confirmation?.driverName || confirmation?.driver_name || 'City Terminal Driver'}
           />
 
           <View style={styles.divider} />

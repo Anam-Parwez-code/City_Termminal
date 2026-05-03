@@ -18,6 +18,7 @@ import {
 import * as Updates from 'expo-updates';
 
 import { useTranslation } from 'react-i18next'; // Translation hook
+import theme from '../theme';
 
 // =============================================
 // LANGUAGE OPTIONS DATA
@@ -111,7 +112,7 @@ const LanguageSelectScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
 
-      <StatusBar barStyle="light-content" backgroundColor="#0F0F10" />
+      <StatusBar barStyle="light-content" backgroundColor={theme.colors.black} />
 
       {/* TOP HEADER AREA */}
       <View style={styles.header}>
@@ -234,196 +235,149 @@ const LanguageSelectScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F10',
+    backgroundColor: theme.colors.white,
     paddingTop: 60,
     paddingHorizontal: 24,
   },
-
-  // Header Section
   header: {
     alignItems: 'center',
     marginBottom: 40,
   },
-
   smallLogo: {
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: '#00732F', // UAE Green
+    backgroundColor: theme.colors.black,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    // Add shadow to logo
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
+    ...theme.shadows.soft,
   },
-
   smallLogoText: {
     fontSize: 24,
     fontWeight: '900',
-    color: '#FFFFFF',
+    color: theme.colors.white,
     letterSpacing: 2,
   },
-
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#F8FAFC',
+    fontSize: theme.fontSizes.title,
+    fontWeight: '900',
+    color: theme.colors.black,
     textAlign: 'center',
     marginBottom: 8,
   },
-
   subtitle: {
-    fontSize: 15,
-    color: '#CBD5E1',
+    fontSize: theme.fontSizes.md,
+    color: theme.colors.muted,
     textAlign: 'center',
     lineHeight: 22,
     paddingHorizontal: 20,
   },
-
-  // Cards Container
   cardsContainer: {
     gap: 16,
     marginBottom: 40,
   },
-
-  // Individual Language Card
   languageCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191A1E',
-    borderRadius: 20,
+    backgroundColor: theme.colors.cardMuted,
+    borderRadius: theme.radii.card,
     padding: 24,
     borderWidth: 2,
-    borderColor: '#2E3138',
-
-    // Soft Shadow
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
+    borderColor: 'transparent',
+    ...theme.shadows.card,
   },
-
-  // Selected State (UAE Green theme)
   languageCardSelected: {
-    borderColor: '#009A44',
-    backgroundColor: '#1F2A21',
+    borderColor: theme.colors.careemGreen,
+    backgroundColor: theme.colors.white,
   },
-
   flag: {
     fontSize: 40,
     marginRight: 18,
   },
-
   langInfo: {
     flex: 1,
   },
-
   langName: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#F8FAFC',
+    fontWeight: '800',
+    color: theme.colors.black,
     marginBottom: 4,
   },
-
   langNameSelected: {
-    color: '#7EE08D',
+    color: theme.colors.black,
   },
-
   langNative: {
     fontSize: 14,
-    color: '#A7B0C0',
-    fontWeight: '500',
+    color: theme.colors.muted,
+    fontWeight: '600',
   },
-
   langNativeSelected: {
-    color: '#B4F5C4',
+    color: theme.colors.muted,
   },
-
-  // Direction Badge (RTL/LTR)
   dirBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: '#2B2F36',
+    backgroundColor: theme.colors.white,
     marginRight: 12,
   },
-
   dirBadgeSelected: {
-    backgroundColor: '#009A44',
+    backgroundColor: theme.colors.careemGreen,
   },
-
   dirText: {
     fontSize: 10,
-    fontWeight: '800',
-    color: '#D1D5DB',
+    fontWeight: '900',
+    color: theme.colors.black,
     letterSpacing: 1,
   },
-
   dirTextSelected: {
-    color: '#FFFFFF', // Text becomes White on Green background
+    color: theme.colors.white,
   },
-
-  // Checkmark Circle
   checkmark: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#009A44',
+    backgroundColor: theme.colors.careemGreen,
     alignItems: 'center',
     justifyContent: 'center',
-    // Little red glow for vibrancy
     borderWidth: 2,
-    borderColor: '#EF3340',
+    borderColor: theme.colors.white,
   },
-
   checkmarkText: {
-    color: '#FFFFFF',
+    color: theme.colors.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
-
-  // Bottom Buttons Area
   bottomArea: {
     gap: 16,
     alignItems: 'center',
   },
-
-  // Continue Button (Vibrant UAE Red)
   continueButton: {
     width: '100%',
-    backgroundColor: '#EF3340',
+    backgroundColor: theme.colors.careemGreen,
     paddingVertical: 20,
-    borderRadius: 18,
+    borderRadius: theme.radii.button,
     alignItems: 'center',
-    // Button Shadow
-    elevation: 6,
-    shadowColor: '#EE2A35',
+    shadowColor: theme.colors.careemGreen,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
+    elevation: 6,
   },
-
   continueButtonDisabled: {
-    backgroundColor: '#6B7280',
+    backgroundColor: '#9CA3AF',
     elevation: 0,
   },
-
   continueText: {
     fontSize: 18,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: 1,
+    fontWeight: '900',
+    color: theme.colors.white,
   },
-
   skipText: {
     fontSize: 15,
-    color: '#A7B0C0',
-    fontWeight: '600',
+    color: theme.colors.black,
+    fontWeight: '700',
     textDecorationLine: 'underline',
   },
 });

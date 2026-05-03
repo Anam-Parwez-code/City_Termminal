@@ -29,6 +29,9 @@ const ensureSlotSupportTables = async () => {
       booking_id VARCHAR(20),
       slot_id INT,
       vehicle_number VARCHAR(20),
+      driver_name VARCHAR(80),
+      pickup_otp VARCHAR(8),
+      proof_qr_code TEXT,
       qr_code TEXT,
       status VARCHAR(20) DEFAULT 'confirmed',
       created_at TIMESTAMP DEFAULT NOW()
@@ -61,7 +64,12 @@ const ensureSlotSupportTables = async () => {
   await pool.query(`ALTER TABLE vehicle_tracking ADD COLUMN IF NOT EXISTS map_y NUMERIC DEFAULT 0.58`);
   await pool.query(`ALTER TABLE vehicle_tracking ADD COLUMN IF NOT EXISTS wait_minutes INT DEFAULT 0`);
   await pool.query(`ALTER TABLE vehicle_tracking ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`);
+  await pool.query(`ALTER TABLE slot_bookings ADD COLUMN IF NOT EXISTS driver_name VARCHAR(80)`);
+  await pool.query(`ALTER TABLE slot_bookings ADD COLUMN IF NOT EXISTS pickup_otp VARCHAR(8)`);
+  await pool.query(`ALTER TABLE slot_bookings ADD COLUMN IF NOT EXISTS proof_qr_code TEXT`);
 };
+
+const makePickupOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
 const getAvailableSlots = async (_req, res) => {
   try {
@@ -85,15 +93,21 @@ const getAvailableSlots = async (_req, res) => {
     });
   } catch (error) {
     console.error('Get slots error:', error);
-    return res.status(500).json({ success: false, message: 'Could not fetch slots' });
+    return res.status(200).json({
+      success: true,
+      demoMode: true,
+      slots: demoSlots(),
+    });
   }
 };
 
 const bookSlot = async (req, res) => {
   let client;
+  let bookingId;
+  let slotId;
 
   try {
-    const { bookingId, slotId } = req.body;
+    ({ bookingId, slotId } = req.body);
 
     if (!bookingId || !slotId) {
       return res.status(400).json({
@@ -126,6 +140,9 @@ const bookSlot = async (req, res) => {
         confirmation: {
           bookingId,
           vehicleNumber: existing.vehicle_number,
+          driverName: existing.driver_name || 'City Terminal Driver',
+          pickupOtp: existing.pickup_otp,
+          proofQrCode: existing.proof_qr_code,
           slotTime: existing.slot_time,
           locationName: existing.location_name,
           locationAddress: existing.location_address,
@@ -162,19 +179,23 @@ const bookSlot = async (req, res) => {
     }
 
     const vehicleNumber = `CT-${Math.floor(Math.random() * 900) + 100}`;
+    const driverName = 'City Terminal Driver';
+    const pickupOtp = makePickupOtp();
     const qrData = JSON.stringify({
       bookingId,
       slotId,
       vehicle: vehicleNumber,
+      driver: driverName,
+      pickupOtp,
       time: slot.slot_time,
       location: slot.location_name,
       generatedAt: new Date().toISOString(),
     });
 
     await client.query(
-      `INSERT INTO slot_bookings (booking_id, slot_id, vehicle_number, qr_code, status)
-       VALUES ($1, $2, $3, $4, 'confirmed')`,
-      [bookingId, slotId, vehicleNumber, qrData]
+      `INSERT INTO slot_bookings (booking_id, slot_id, vehicle_number, driver_name, pickup_otp, qr_code, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'confirmed')`,
+      [bookingId, slotId, vehicleNumber, driverName, pickupOtp, qrData]
     );
 
     await client.query(
@@ -182,8 +203,8 @@ const bookSlot = async (req, res) => {
          booking_id, vehicle_number, driver_name, passenger_count, status,
          current_location, map_x, map_y, wait_minutes, updated_at
        )
-       VALUES ($1, $2, 'City Terminal Driver', 1, 'Assigned', $3, 0.48, 0.58, 0, NOW())`,
-      [bookingId, vehicleNumber, `Assigned for pickup at ${slot.location_name}`]
+       VALUES ($1, $2, $3, 1, 'Assigned', $4, 0.48, 0.58, 0, NOW())`,
+      [bookingId, vehicleNumber, driverName, `Assigned for pickup at ${slot.location_name}`]
     );
 
     try {
@@ -205,6 +226,8 @@ const bookSlot = async (req, res) => {
       confirmation: {
         bookingId,
         vehicleNumber,
+        driverName,
+        pickupOtp,
         slotTime: slot.slot_time,
         locationName: slot.location_name,
         locationAddress: slot.location_address,
@@ -219,12 +242,101 @@ const bookSlot = async (req, res) => {
       } catch (_rollbackErr) {}
     }
     console.error('Book slot error:', error);
+    const demoSlot = getDemoSlot(slotId) || demoSlots()[0];
+    if (bookingId && demoSlot) {
+      const vehicleNumber = `CT-${Math.floor(Math.random() * 99) + 101}`;
+      const driverName = 'City Terminal Driver';
+      const pickupOtp = makePickupOtp();
+      const qrData = JSON.stringify({
+        bookingId,
+        slotId: demoSlot.id,
+        vehicle: vehicleNumber,
+        driver: driverName,
+        pickupOtp,
+        time: demoSlot.slot_time,
+        location: demoSlot.location_name,
+        generatedAt: new Date().toISOString(),
+        demoMode: true,
+      });
+
+      return res.status(200).json({
+        success: true,
+        demoMode: true,
+        message: 'Slot booked in demo mode.',
+        confirmation: {
+          bookingId,
+          vehicleNumber,
+          driverName,
+          pickupOtp,
+          slotTime: demoSlot.slot_time,
+          locationName: demoSlot.location_name,
+          locationAddress: demoSlot.location_address,
+          qrCode: qrData,
+          status: 'confirmed',
+        },
+      });
+    }
     return res.status(500).json({
       success: false,
       message: 'Booking failed: ' + error.message,
     });
   } finally {
     if (client) client.release();
+  }
+};
+
+const confirmPickupOtp = async (req, res) => {
+  try {
+    const { bookingId, otp } = req.body;
+
+    if (!bookingId || !otp) {
+      return res.status(400).json({ success: false, message: 'bookingId and otp are required' });
+    }
+
+    await ensureSlotSupportTables();
+
+    const existing = await pool.query(
+      `SELECT sb.*, s.slot_time, s.location_name
+       FROM slot_bookings sb
+       LEFT JOIN slots s ON s.id = sb.slot_id
+       WHERE UPPER(sb.booking_id) = UPPER($1)
+       ORDER BY sb.created_at DESC
+       LIMIT 1`,
+      [bookingId]
+    );
+
+    if (existing.rows.length === 0 || String(existing.rows[0].pickup_otp) !== String(otp).trim()) {
+      return res.status(401).json({ success: false, message: 'Invalid pickup OTP' });
+    }
+
+    const row = existing.rows[0];
+    const proofQrCode = JSON.stringify({
+      type: 'luggage_pickup_proof',
+      bookingId: row.booking_id,
+      vehicle: row.vehicle_number,
+      driver: row.driver_name || 'City Terminal Driver',
+      pickupOtp: row.pickup_otp,
+      pickupLocation: row.location_name,
+      verifiedAt: new Date().toISOString(),
+    });
+
+    await pool.query(
+      `UPDATE slot_bookings
+       SET proof_qr_code = $1, status = 'picked_up'
+       WHERE id = $2`,
+      [proofQrCode, row.id]
+    );
+
+    await pool.query(
+      `UPDATE vehicle_tracking
+       SET status = 'picked_up', current_location = 'Luggage picked up - heading to airport', updated_at = NOW()
+       WHERE UPPER(booking_id) = UPPER($1)`,
+      [bookingId]
+    );
+
+    return res.status(200).json({ success: true, proofQrCode, status: 'picked_up' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -248,4 +360,4 @@ const getSlotByBooking = async (req, res) => {
   }
 };
 
-module.exports = { getAvailableSlots, bookSlot, getSlotByBooking };
+module.exports = { getAvailableSlots, bookSlot, getSlotByBooking, confirmPickupOtp };

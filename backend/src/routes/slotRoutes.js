@@ -11,6 +11,9 @@ router.get('/available', slotController.getAvailableSlots);
 // POST /api/slots/book — Slot book karo
 router.post('/book', slotController.bookSlot);
 
+// POST /api/slots/confirm-pickup — Driver verifies pickup OTP and generates proof QR
+router.post('/confirm-pickup', slotController.confirmPickupOtp);
+
 // GET /api/slots/booking/:bookingId — Booking ka slot details
 router.get('/booking/:bookingId', slotController.getSlotByBooking);
 

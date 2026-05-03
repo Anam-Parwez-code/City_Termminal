@@ -179,6 +179,42 @@ const apiService = {
     // Returns: { success: true, confirmation: { vehicleNumber, slotTime, qrCode, ... } }
   },
 
+  assignVehicle: async ({ bookingId, pickupLocation, destinationTerminal, pickupCoordinates }) => {
+    const result = await api.post('/otp/assign', {
+      bookingId,
+      pickupLocation,
+      destinationTerminal,
+      pickupCoordinates,
+    });
+    return result;
+  },
+
+  verifyVehicleId: async ({ bookingId, vehicleId }) => {
+    const result = await api.post('/otp/verify', {
+      bookingId,
+      vehicleId,
+    });
+    return result;
+  },
+
+  getOTPStatus: async (bookingId) => {
+    const result = await api.get(`/otp/status/${bookingId}`);
+    return result;
+  },
+
+  driverReachedAirport: async (bookingId) => {
+    const result = await api.put(`/otp/reached/${bookingId}`);
+    return result;
+  },
+
+  confirmPickupOtp: async ({ bookingId, otp }) => {
+    const result = await api.post('/slots/confirm-pickup', {
+      bookingId,
+      otp,
+    });
+    return result;
+  },
+
   // ── AI CHATBOT: LIVE STATUS + BILINGUAL SUPPORT ─────────
   // POST /chat (SSE stream) is handled by direct fetch/eventsource client.
   // This helper is non-streaming status fetch for Arrived / tracking screens.

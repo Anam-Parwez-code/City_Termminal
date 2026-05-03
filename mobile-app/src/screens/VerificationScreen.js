@@ -67,17 +67,15 @@ const VerificationScreen = ({ navigation, route }) => {
   const handleConfirm = async () => {
     setIsLoading(true);
 
-    try {
-      await apiService.updatePassportData({
-        bookingId,
-        passportNumber: passportNo.trim(),
-        verifiedName: name.trim(),
-        dateOfBirth: dob.trim(),
-        nationality: nationality.trim(),
-      });
-    } catch (_err) {
-      // Continue even if passport persistence is temporarily unavailable.
-    }
+    apiService.updatePassportData({
+      bookingId,
+      passportNumber: passportNo.trim(),
+      verifiedName: name.trim(),
+      dateOfBirth: dob.trim(),
+      nationality: nationality.trim(),
+    }).catch(() => {
+      // Optional persistence should never block the booking flow.
+    });
 
     // Chhota delay — loading dikhao — phir navigate
     setTimeout(() => {
@@ -92,7 +90,6 @@ const VerificationScreen = ({ navigation, route }) => {
           nationality: nationality.trim(),
         },
       });
-      setIsLoading(false);
     }, 500);
   };
 

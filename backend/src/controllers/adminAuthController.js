@@ -131,11 +131,28 @@ const signupAdmin = async (req, res) => {
       await ensureAdminUsersTable();
       // Already exists?
       const existing = await pool.query(
-        'SELECT email FROM admin_users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+        'SELECT email, password, role, name FROM admin_users WHERE LOWER(email) = LOWER($1) LIMIT 1',
         [email.trim()]
       );
 
       if (existing.rows.length > 0) {
+        const dbUser = existing.rows[0];
+
+        if (dbUser.password === password.trim()) {
+          const token = jwt.sign(
+            { email: dbUser.email, role: dbUser.role, name: dbUser.name },
+            JWT_SECRET,
+            { expiresIn: JWT_EXPIRES_IN }
+          );
+
+          return res.status(200).json({
+            success: true,
+            token,
+            user: { email: dbUser.email, role: dbUser.role, name: dbUser.name },
+            message: 'Account already exists. Logged in instead.',
+          });
+        }
+
         return res.status(409).json({
           success: false,
           message: 'User already exists. Please login.',
@@ -157,17 +174,22 @@ const signupAdmin = async (req, res) => {
       console.error('DB error in signup — using fallback:', dbErr.message);
 
       // Fallback — in-memory
-      const existsFallback = fallbackUsers.some(
+      const existsFallback = fallbackUsers.find(
         u => u.email.toLowerCase() === email.toLowerCase().trim()
       );
 
       if (existsFallback) {
-        return res.status(409).json({
+        if (existsFallback.password === password.trim()) {
+          createdUser = { email: existsFallback.email, role: existsFallback.role, name: existsFallback.name };
+        } else {
+          return res.status(409).json({
           success: false,
           message: 'User already exists. Please login.',
-        });
+          });
+        }
       }
 
+      if (!createdUser) {
       const newUser = {
         email: email.trim(),
         password: password.trim(),
@@ -177,6 +199,7 @@ const signupAdmin = async (req, res) => {
       fallbackUsers.push(newUser);
       createdUser = { email: newUser.email, role: newUser.role, name: newUser.name };
       console.log('✅ Signup via fallback:', createdUser.email);
+      }
     }
 
     // Token generate karo

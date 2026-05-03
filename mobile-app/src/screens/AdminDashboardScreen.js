@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import QRCode from 'react-native-qrcode-svg';
 import adminService from '../services/adminService';
+import QRCodeBox from '../components/QRCodeBox';
 
 const AdminDashboardScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
@@ -71,7 +71,7 @@ const AdminDashboardScreen = ({ navigation }) => {
             </View>
           </View>
           <View style={styles.qrHero}>
-            <QRCode value={String(myTrip.qr_code || myTrip.booking_id)} size={148} />
+            <QRCodeBox value={String(myTrip.proof_qr_code || myTrip.qr_code || myTrip.booking_id)} size={148} />
           </View>
           <View style={styles.tripGrid}>
             <View style={styles.tripInfo}><Text style={styles.tripLabel}>Vehicle</Text><Text style={styles.tripValue}>{myTrip.vehicle_number || 'Not assigned'}</Text></View>
@@ -80,6 +80,8 @@ const AdminDashboardScreen = ({ navigation }) => {
             <View style={styles.tripInfo}><Text style={styles.tripLabel}>Departure</Text><Text style={styles.tripValue}>{myTrip.departure_time || '--'}</Text></View>
             <View style={styles.tripInfoWide}><Text style={styles.tripLabel}>Vehicle Location</Text><Text style={styles.tripValue}>{myTrip.current_location || 'Status will update after dispatch'}</Text></View>
             <View style={styles.tripInfoWide}><Text style={styles.tripLabel}>Flight Status</Text><Text style={styles.tripValue}>{myTrip.flight_status || myTrip.status || 'Scheduled'}</Text></View>
+            <View style={styles.tripInfo}><Text style={styles.tripLabel}>Pickup OTP</Text><Text style={styles.tripValue}>{myTrip.pickup_otp || '--'}</Text></View>
+            <View style={styles.tripInfo}><Text style={styles.tripLabel}>Proof QR</Text><Text style={styles.tripValue}>{myTrip.proof_qr_code ? 'Generated' : 'Pending OTP'}</Text></View>
           </View>
         </View>
       )}
@@ -110,7 +112,7 @@ const AdminDashboardScreen = ({ navigation }) => {
         <View style={styles.qrList}>
           {passengers.filter((p) => p.qr_code || p.booking_id).slice(0, 3).map((item) => (
             <View key={item.booking_id} style={styles.qrCard}>
-              <QRCode value={String(item.qr_code || item.booking_id)} size={112} />
+              <QRCodeBox value={String(item.proof_qr_code || item.qr_code || item.booking_id)} size={112} />
               <Text style={styles.qrLabel}>Booking: {item.booking_id}</Text>
               <Text style={styles.qrSub}>{item.name || 'Passenger'}</Text>
               <Text style={styles.qrSub}>Vehicle: {item.vehicle_number || 'Not assigned'}</Text>

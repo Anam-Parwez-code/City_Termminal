@@ -26,6 +26,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
 import PassportScan from './PassportScanScreen'; // Hamara API helper
+import BrandMark from '../components/BrandMark';
+import theme from '../theme';
 
 // ============================================================
 // AIRLINES DATA — Dropdown mein dikhenge
@@ -156,7 +158,7 @@ const BookingEntryScreen = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled" // Keyboard open ho tab bhi tap kaam kare
       >
-        <StatusBar barStyle="light-content" backgroundColor="#121212" />
+        <StatusBar barStyle="dark-content" backgroundColor={theme.colors.white} />
 
         {/* UAE / Dubai inspired decorative background */}
         <View pointerEvents="none" style={styles.themeBackdrop}>
@@ -195,6 +197,7 @@ const BookingEntryScreen = ({ navigation }) => {
 
         {/* ── TITLE AREA ── */}
         <View style={styles.titleArea}>
+          <BrandMark size="md" stacked={false} />
           <Text style={[styles.title, isRTL && styles.textRight]}>{t('bookingEntry.title')}</Text>
           <Text style={[styles.subtitle, isRTL && styles.textRight]}>
             {t('bookingEntry.subtitle')}
@@ -350,7 +353,7 @@ const styles = StyleSheet.create({
 
   keyboardView: {
     flex: 1,
-    backgroundColor: '#0F0F10',
+    backgroundColor: theme.colors.white,
   },
 
   container: {
@@ -368,7 +371,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 8,
-    backgroundColor: '#EF3340',
+    backgroundColor: theme.colors.careemGreen,
     borderRadius: 8,
   },
   flagStripeGreen: {
@@ -377,7 +380,7 @@ const styles = StyleSheet.create({
     left: 18,
     right: 18,
     height: 3,
-    backgroundColor: '#009A44',
+    backgroundColor: theme.colors.careemGreen,
     opacity: 0.95,
     borderRadius: 4,
   },
@@ -397,7 +400,7 @@ const styles = StyleSheet.create({
     left: 18,
     right: 18,
     height: 2,
-    backgroundColor: '#141414',
+    backgroundColor: theme.colors.black,
     opacity: 0.9,
     borderRadius: 4,
   },
@@ -447,10 +450,10 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#1A1A1D',
+    backgroundColor: theme.colors.cardMuted,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#EF3340',
+    shadowColor: theme.colors.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
@@ -459,11 +462,11 @@ const styles = StyleSheet.create({
 
   backArrow: {
     fontSize: 20,
-    color: '#F9FAFB',
+    color: theme.colors.black,
   },
 
   stepBadge: {
-    backgroundColor: '#163A1C',
+    backgroundColor: theme.colors.cardMuted,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
@@ -472,24 +475,25 @@ const styles = StyleSheet.create({
   stepText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#D7F6DF',
+    color: theme.colors.black,
   },
 
   // Title
   titleArea: {
     marginBottom: 32,
+    gap: 18,
   },
 
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#F8FAFC',
+    fontSize: theme.fontSizes.title,
+    fontWeight: '900',
+    color: theme.colors.black,
     marginBottom: 8,
   },
 
   subtitle: {
     fontSize: 14,
-    color: '#CBD5E1',
+    color: theme.colors.muted,
     lineHeight: 20,
   },
 
@@ -506,18 +510,18 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#E5E7EB',
+    color: theme.colors.black,
   },
 
   input: {
-    backgroundColor: '#191A1E',
+    backgroundColor: theme.colors.cardMuted,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 16,
     fontSize: 16,
-    color: '#F8FAFC',
+    color: theme.colors.black,
     borderWidth: 1.5,
-    borderColor: '#2E3138',
+    borderColor: 'transparent',
     fontWeight: '500',
     letterSpacing: 1,
   },
@@ -528,31 +532,31 @@ const styles = StyleSheet.create({
 
   helperText: {
     fontSize: 12,
-    color: '#A7B0C0',
+    color: theme.colors.muted,
   },
 
   // Dropdown
   dropdown: {
-    backgroundColor: '#191A1E',
+    backgroundColor: theme.colors.cardMuted,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderWidth: 1.5,
-    borderColor: '#2E3138',
+    borderColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
 
   dropdownOpen: {
-    borderColor: '#009A44',
+    borderColor: theme.colors.careemGreen,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
   },
 
   dropdownSelected: {
     fontSize: 15,
-    color: '#F8FAFC',
+    color: theme.colors.black,
     fontWeight: '500',
   },
 
@@ -568,10 +572,10 @@ const styles = StyleSheet.create({
 
   // Airline list
   airlineList: {
-    backgroundColor: '#191A1E',
+    backgroundColor: theme.colors.white,
     borderWidth: 1.5,
     borderTopWidth: 0,
-    borderColor: '#009A44',
+    borderColor: theme.colors.careemGreen,
     borderBottomLeftRadius: 14,
     borderBottomRightRadius: 14,
     overflow: 'hidden',
@@ -588,7 +592,7 @@ const styles = StyleSheet.create({
   },
 
   airlineItemSelected: {
-    backgroundColor: '#1F2A21',
+    backgroundColor: theme.colors.cardMuted,
   },
 
   airlineFlag: {
@@ -598,13 +602,13 @@ const styles = StyleSheet.create({
   airlineName: {
     flex: 1,
     fontSize: 15,
-    color: '#F3F4F6',
+    color: theme.colors.black,
     fontWeight: '500',
   },
 
   airlineTick: {
     fontSize: 16,
-    color: '#00C257',
+    color: theme.colors.careemGreen,
     fontWeight: 'bold',
   },
 
@@ -625,8 +629,8 @@ const styles = StyleSheet.create({
 
   // Buttons
   continueButton: {
-    backgroundColor: '#EF3340',
-    borderRadius: 16,
+    backgroundColor: theme.colors.careemGreen,
+    borderRadius: theme.radii.button,
     paddingVertical: 18,
     alignItems: 'center',
     marginTop: 8,
@@ -649,7 +653,7 @@ const styles = StyleSheet.create({
 
   demoText: {
     fontSize: 13,
-    color: '#7EE08D',
+    color: theme.colors.black,
     textDecorationLine: 'underline',
   },
   textRight: {
