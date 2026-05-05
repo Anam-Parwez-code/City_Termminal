@@ -29,6 +29,8 @@ import ArrivedScreen from '../screens/ArrivedScreen';
 import ChatSupportScreen from '../screens/ChatSupportScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
 import TimeSlotScreen from '../screens/TimeSlotScreen';
+import DriverTripScreen from '../screens/DriverTripScreen';
+import DriverProfileScreen from '../screens/DriverProfileScreen';
 import theme from '../theme';
 
 // Stack navigator create karo
@@ -53,7 +55,7 @@ const AppNavigator = () => {
   const bookingIdRef = useRef('');
 
   const hideFloatingControls = useMemo(
-    () => new Set(['Splash', 'LanguageSelect', 'Auth', 'ChatSupport']),
+    () => new Set(['Splash', 'LanguageSelect', 'Auth', 'ChatSupport', 'DriverTrip', 'DriverProfile']),
     []
   );
 
@@ -104,6 +106,8 @@ const AppNavigator = () => {
           <Stack.Screen name="ChatSupport" component={ChatSupportScreen} />
           <Stack.Screen name="UserProfile" component={UserProfileScreen} />
           <Stack.Screen name="TimeSlot" component={TimeSlotScreen} />
+          <Stack.Screen name="DriverTrip" component={DriverTripScreen} />
+          <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />
         </Stack.Navigator>
       </NavigationContainer>
 
@@ -119,12 +123,25 @@ const AppNavigator = () => {
 
           {menuOpen && (
             <View style={styles.menuCard}>
-              <TouchableOpacity style={styles.menuItem} onPress={() => navigateSafe('BookingEntry')}>
+              <TouchableOpacity style={styles.menuItem} onPress={() => {
+                setMenuOpen(false);
+                if (currentRoute === 'UserProfile' || currentRoute === 'DriverProfile' || currentRoute === 'AdminDashboard') {
+                  if (navigationRef.canGoBack()) {
+                    navigationRef.goBack();
+                    return;
+                  }
+                }
+                // If unable to go back, we can just leave it or go to home screen for user
+              }}>
                 <Text style={styles.menuText}>Home</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.menuItem, styles.menuItemLast]}
-                onPress={() => navigateSafe('UserProfile')}
+                onPress={() => {
+                  // Wait, AdminDashboard has no profile. But let's just go to UserProfile for general case.
+                  // If we wanted strictly role-based profile:
+                  navigateSafe('UserProfile');
+                }}
               >
                 <Text style={styles.menuText}>My Profile</Text>
               </TouchableOpacity>

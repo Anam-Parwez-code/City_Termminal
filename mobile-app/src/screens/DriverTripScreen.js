@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import { io } from 'socket.io-client';
-import { socketOrigin } from '../config';
-import driverClient, { apiErrorMessage, verifyPassengerVehicle } from '../api/driverClient';
-import { loadDriverSession, saveDriverSession } from '../sessionStorage';
+import { socketOrigin } from '../services/driverClient';
+import driverClient, { apiErrorMessage } from '../services/driverClient';
+import { loadDriverSession, saveDriverSession } from '../services/driverSession';
 
 export default function DriverTripScreen({ navigation }) {
   const [bookingId, setBookingId] = useState('');
@@ -143,30 +143,6 @@ export default function DriverTripScreen({ navigation }) {
     } catch (err) {
       append(`mark-at-pickup: ${apiErrorMessage(err)}`);
       Alert.alert('Could not update status', apiErrorMessage(err));
-    }
-  };
-
-  const verifyPassengerOTP = async () => {
-    if (!requireIds()) return;
-    try {
-      const result = await verifyPassengerVehicle({
-        bookingId: bookingId.trim(),
-        vehicleId: vehicleId.trim(),
-      });
-      append('Passenger verified! Barcode generated.');
-      socket.emit('status_update', {
-        bookingId: bookingId.trim(),
-        booking_id: bookingId.trim(),
-        vehicle_number: vehicleId.trim(),
-        vehicleId: vehicleId.trim(),
-        status: 'Barcode issued',
-        barcode_data: result?.status?.barcodeData || result?.status?.barcode_data,
-        updated_at: new Date().toISOString(),
-      });
-      Alert.alert('Success', 'Passenger verified. They can now see their barcode.');
-    } catch (err) {
-      append(`Verify OTP: ${apiErrorMessage(err)}`);
-      Alert.alert('Verification failed', apiErrorMessage(err));
     }
   };
 
@@ -330,11 +306,7 @@ export default function DriverTripScreen({ navigation }) {
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.btn} onPress={markAtPickup}>
-          <Text style={styles.btnTxt}>2 · Arrived at pickup</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.btn, { backgroundColor: '#eab308' }]} onPress={verifyPassengerOTP}>
-          <Text style={[styles.btnTxt, { color: '#000' }]}>3 · Verify Passenger (OTP step)</Text>
+          <Text style={styles.btnTxt}>2 · Arrived at pickup (Vehicle ID step)</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.btn} onPress={startSharing}>

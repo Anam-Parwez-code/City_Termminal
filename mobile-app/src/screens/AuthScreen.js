@@ -9,8 +9,10 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from 'react-native';
 import adminService from '../services/adminService';
+import { saveDriverSession } from '../services/driverSession';
 import BrandMark from '../components/BrandMark';
 import theme from '../theme';
 
@@ -19,9 +21,28 @@ const AuthScreen = ({ navigation }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [driverId, setDriverId] = useState('');
+  const [isAvailable, setIsAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
+    if (mode === 'driver') {
+      if (!driverId.trim()) {
+        Alert.alert('Required', 'Please enter your Driver / Vehicle ID.');
+        return;
+      }
+      setLoading(true);
+      try {
+        await saveDriverSession('', driverId.trim().toUpperCase());
+        navigation.replace('DriverTrip');
+      } catch (err) {
+        Alert.alert('Login failed', 'Could not authenticate driver.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (!email.trim() || !password.trim()) {
       Alert.alert('Required', 'Please enter email and password.');
       return;
@@ -75,36 +96,61 @@ const AuthScreen = ({ navigation }) => {
               style={[styles.switchBtn, mode === 'signup' && styles.switchBtnActive]}
               onPress={() => setMode('signup')}
             >
-              <Text style={[styles.switchTxt, mode === 'signup' && styles.switchTxtActive]}>Create account</Text>
+              <Text style={[styles.switchTxt, mode === 'signup' && styles.switchTxtActive]}>Create</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.switchBtn, mode === 'driver' && styles.switchBtnActive]}
+              onPress={() => setMode('driver')}
+            >
+              <Text style={[styles.switchTxt, mode === 'driver' && styles.switchTxtActive]}>Driver</Text>
             </TouchableOpacity>
           </View>
 
-          {mode === 'signup' && (
-            <TextInput
-              style={styles.input}
-              placeholder="Full name"
-              placeholderTextColor={theme.colors.muted}
-              value={name}
-              onChangeText={setName}
-            />
+          {mode === 'driver' ? (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Driver / Vehicle ID (e.g. CT-102)"
+                placeholderTextColor={theme.colors.muted}
+                value={driverId}
+                onChangeText={setDriverId}
+                autoCapitalize="characters"
+              />
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4 }}>
+                 <Text style={{ flex: 1, color: theme.colors.black, fontWeight: '700' }}>Available for shifts</Text>
+                 <Switch value={isAvailable} onValueChange={setIsAvailable} trackColor={{ false: '#d1d5db', true: '#163a1c' }} thumbColor={isAvailable ? '#47d361' : '#f3f4f6'} />
+              </View>
+            </>
+          ) : (
+            <>
+              {mode === 'signup' && (
+                <TextInput
+                  style={styles.input}
+                  placeholder="Full name"
+                  placeholderTextColor={theme.colors.muted}
+                  value={name}
+                  onChangeText={setName}
+                />
+              )}
+              <TextInput
+                style={styles.input}
+                placeholder="Email"
+                placeholderTextColor={theme.colors.muted}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={email}
+                onChangeText={setEmail}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor={theme.colors.muted}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+              />
+            </>
           )}
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={theme.colors.muted}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={email}
-            onChangeText={setEmail}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={theme.colors.muted}
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
 
           <TouchableOpacity
             style={[styles.submitButton, loading && styles.disabledBtn]}
@@ -112,7 +158,7 @@ const AuthScreen = ({ navigation }) => {
             onPress={handleSubmit}
           >
             <Text style={styles.submitText}>
-              {loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Login'}
+              {loading ? 'Please wait...' : mode === 'driver' ? 'Driver Login' : mode === 'signup' ? 'Create Account' : 'Login'}
             </Text>
           </TouchableOpacity>
         </View>

@@ -23,7 +23,10 @@ const COLORS = {
 
 const formatTime = (dateString) => {
   if (!dateString) return '--';
-  return new Date(dateString).toLocaleTimeString('en-US', {
+  let date = new Date(dateString);
+  if (isNaN(date.getTime())) date = new Date(dateString.replace(' ', 'T'));
+  if (isNaN(date.getTime())) return String(dateString);
+  return date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,

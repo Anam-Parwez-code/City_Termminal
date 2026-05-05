@@ -5,11 +5,9 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   Alert,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -90,8 +88,6 @@ const LiveTrackingScreen = ({ navigation, route }) => {
   const confirmation = params.confirmation || {};
 
   const [statusData, setStatusData] = useState(null);
-  const [enteredVehicleId, setEnteredVehicleId] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
   const [driverCoords, setDriverCoords] = useState(null);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -216,7 +212,24 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           }
         });
 
-        socket.on('status_update', () => fetchStatus());
+        socket.on('status_update', (payload = {}) => {
+          const pb = String(payload.bookingId || payload.booking_id || '').toUpperCase();
+          const my = String(bookingId || '').toUpperCase();
+          if (pb && pb !== my) return;
+          setStatusData((prev) => ({
+            ...(prev || {}),
+            status: payload.status || prev?.status,
+            barcodeData: payload.barcodeData || payload.barcode_data || prev?.barcodeData,
+            barcode_data: payload.barcode_data || payload.barcodeData || prev?.barcode_data,
+            currentLocation: payload.currentLocation || payload.current_location || prev?.currentLocation,
+            current_location: payload.current_location || payload.currentLocation || prev?.current_location,
+            vehicleId: payload.vehicleId || payload.vehicle_number || prev?.vehicleId,
+            vehicle_id: payload.vehicle_id || payload.vehicleId || payload.vehicle_number || prev?.vehicle_id,
+            driverName: payload.driverName || payload.driver_name || payload.driver || prev?.driverName,
+            driverPhone: payload.driverPhone || payload.driver_phone || prev?.driverPhone,
+          }));
+          fetchStatus();
+        });
       }
     } catch (_e) {
       //
@@ -262,37 +275,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
     vehicleId,
   ]);
 
-  const handleVerifyVehicle = async () => {
-    if (!enteredVehicleId.trim()) {
-      Alert.alert('Missing Info', 'Please enter the Vehicle ID the driver communicated.');
-      return;
-    }
-    setIsVerifying(true);
-    try {
-      const result = await apiService.verifyVehicleId({
-        bookingId,
-        vehicleId: enteredVehicleId.trim(),
-      });
-      navigation.navigate('UserProfile', {
-        ...params,
-        statusData: result.status,
-        confirmation: {
-          ...confirmation,
-          vehicleId: result.status?.vehicleId || enteredVehicleId,
-          vehicleNumber: result.status?.vehicleId || enteredVehicleId,
-          locationName: pickupLocation,
-          destinationTerminal,
-          barcodeData: result.status?.barcodeData,
-          driverName: result.status?.driverName,
-          driverPhone: result.status?.driverPhone,
-        },
-      });
-    } catch (err) {
-      Alert.alert('Verification Failed', err.message || 'Invalid Vehicle ID');
-    } finally {
-      setIsVerifying(false);
-    }
-  };
+
 
   return (
     <View style={styles.container}>
@@ -398,7 +381,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
         {normalizeStatus(statusData?.status) === 'dispatched' && (
           <Text style={styles.flowHint}>
-            Flow: driver marks “en route” → “at pickup” on their app → you enter Vehicle ID → barcode → then airport leg.
+            Flow: driver marks en route, then at pickup. Share this Vehicle ID with the driver so they can verify you and unlock the barcode.
           </Text>
         )}
 
@@ -412,27 +395,9 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
         {isAtPickup && (
           <View style={styles.verificationContainer}>
-            <Text style={styles.verificationLabel}>Driver reached you — enter Vehicle ID:</Text>
-            <View style={styles.verificationInputRow}>
-              <TextInput
-                style={styles.verificationInput}
-                placeholder="e.g. CT-102"
-                placeholderTextColor={COLORS.muted}
-                value={enteredVehicleId}
-                onChangeText={setEnteredVehicleId}
-                autoCapitalize="characters"
-              />
-              <TouchableOpacity
-                style={[styles.verifyButton, isVerifying && styles.disabledButton]}
-                onPress={handleVerifyVehicle}
-                disabled={isVerifying}
-              >
-                {isVerifying ? (
-                  <ActivityIndicator color="#08100A" />
-                ) : (
-                  <Text style={styles.verifyButtonText}>Verify</Text>
-                )}
-              </TouchableOpacity>
+            <Text style={styles.verificationLabel}>Driver reached you! Tell them your Vehicle ID (OTP) to unlock your barcode:</Text>
+            <View style={{ backgroundColor: '#0A0A0B', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#2A2F36' }}>
+              <Text style={{ fontSize: 32, fontWeight: '900', color: '#47D361', letterSpacing: 2 }}>{vehicleId}</Text>
             </View>
           </View>
         )}

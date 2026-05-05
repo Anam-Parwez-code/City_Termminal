@@ -32,7 +32,9 @@ const { width } = Dimensions.get('window');
 // ============================================================
 const formatTime = (dateString) => {
   if (!dateString) return '--';
-  const date = new Date(dateString);
+  let date = new Date(dateString);
+  if (isNaN(date.getTime())) date = new Date(dateString.replace(' ', 'T'));
+  if (isNaN(date.getTime())) return String(dateString);
   return date.toLocaleTimeString('en-US', {
     hour: '2-digit', minute: '2-digit', hour12: true,
   });
@@ -40,7 +42,9 @@ const formatTime = (dateString) => {
 
 const formatDate = (dateString) => {
   if (!dateString) return '--';
-  const date = new Date(dateString);
+  let date = new Date(dateString);
+  if (isNaN(date.getTime())) date = new Date(dateString.replace(' ', 'T'));
+  if (isNaN(date.getTime())) return String(dateString);
   return date.toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric',
     month: 'long', day: 'numeric',

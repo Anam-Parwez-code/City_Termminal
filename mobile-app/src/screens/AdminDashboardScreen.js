@@ -71,7 +71,13 @@ const AdminDashboardScreen = ({ navigation }) => {
             </View>
           </View>
           <View style={styles.qrHero}>
-            <QRCodeBox value={String(myTrip.proof_qr_code || myTrip.qr_code || myTrip.booking_id)} size={148} />
+            {myTrip.proof_qr_code ? (
+              <QRCodeBox value={String(myTrip.proof_qr_code)} size={148} />
+            ) : (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <Text style={{ color: '#94A3B8', textAlign: 'center' }}>QR available after driver verifies vehicle</Text>
+              </View>
+            )}
           </View>
           <View style={styles.tripGrid}>
             <View style={styles.tripInfo}><Text style={styles.tripLabel}>Vehicle</Text><Text style={styles.tripValue}>{myTrip.vehicle_number || 'Not assigned'}</Text></View>
@@ -108,11 +114,11 @@ const AdminDashboardScreen = ({ navigation }) => {
       </View>
 
       {!myTrip && <Text style={styles.sectionTitle}>Passenger Boarding QR</Text>}
-      {!myTrip && passengers.filter((p) => p.qr_code || p.booking_id).length > 0 ? (
+      {!myTrip && passengers.filter((p) => p.proof_qr_code).length > 0 ? (
         <View style={styles.qrList}>
-          {passengers.filter((p) => p.qr_code || p.booking_id).slice(0, 3).map((item) => (
+          {passengers.filter((p) => p.proof_qr_code).slice(0, 3).map((item) => (
             <View key={item.booking_id} style={styles.qrCard}>
-              <QRCodeBox value={String(item.proof_qr_code || item.qr_code || item.booking_id)} size={112} />
+              <QRCodeBox value={String(item.proof_qr_code)} size={112} />
               <Text style={styles.qrLabel}>Booking: {item.booking_id}</Text>
               <Text style={styles.qrSub}>{item.name || 'Passenger'}</Text>
               <Text style={styles.qrSub}>Vehicle: {item.vehicle_number || 'Not assigned'}</Text>
@@ -121,7 +127,7 @@ const AdminDashboardScreen = ({ navigation }) => {
           ))}
         </View>
       ) : !myTrip ? (
-        <Text style={styles.emptyText}>No passenger booking available for QR.</Text>
+        <Text style={styles.emptyText}>No passenger boarding QR available yet.</Text>
       ) : null}
 
       <TouchableOpacity

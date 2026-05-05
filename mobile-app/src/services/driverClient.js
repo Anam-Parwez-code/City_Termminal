@@ -1,5 +1,7 @@
 import axios from 'axios';
-import { API_BASE_URL } from '../config';
+
+// Update when testing on devices to match passenger app IP
+const API_BASE_URL = 'http://192.168.176.224:5000/api';
 
 const client = axios.create({
   baseURL: API_BASE_URL,
@@ -21,15 +23,6 @@ export async function fetchTripStatus(bookingId) {
   return data;
 }
 
-export async function verifyPassengerVehicle({ bookingId, vehicleId }) {
-  const id = String(bookingId || '').trim();
-  const vehicle = String(vehicleId || '').trim();
-  if (!id || !vehicle) throw new Error('Booking ID and Vehicle ID are required');
-  const { data } = await client.post('/otp/verify-vehicle', {
-    bookingId: id,
-    vehicleId: vehicle,
-  });
-  return data;
-}
+export const socketOrigin = API_BASE_URL.replace(/\/api\/?$/i, '').trim();
 
 export default client;

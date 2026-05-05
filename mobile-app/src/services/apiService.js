@@ -201,7 +201,7 @@ const apiService = {
   },
 
   verifyVehicleId: async ({ bookingId, vehicleId }) => {
-    const result = await api.post('/otp/verify', {
+    const result = await api.post('/otp/verify-vehicle', {
       bookingId,
       vehicleId,
     });

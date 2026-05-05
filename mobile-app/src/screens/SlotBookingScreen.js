@@ -33,7 +33,10 @@ import theme from '../theme';
 // "2026-04-30T14:30:00" → "2:30 PM"
 // ============================================================
 const formatTime = (dateString) => {
-  const date = new Date(dateString);
+  if (!dateString) return '--';
+  let date = new Date(dateString);
+  if (isNaN(date.getTime())) date = new Date(dateString.replace(' ', 'T'));
+  if (isNaN(date.getTime())) return String(dateString);
   return date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
@@ -43,7 +46,10 @@ const formatTime = (dateString) => {
 
 // "2026-04-30T14:30:00" → "Wed, Apr 30"
 const formatDate = (dateString) => {
-  const date = new Date(dateString);
+  if (!dateString) return '--';
+  let date = new Date(dateString);
+  if (isNaN(date.getTime())) date = new Date(dateString.replace(' ', 'T'));
+  if (isNaN(date.getTime())) return String(dateString);
   return date.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',

@@ -21,10 +21,10 @@ export async function searchPickupPlaces(query) {
   const rows = await res.json();
   return Array.isArray(rows)
     ? rows.map((item) => ({
-        id: String(item.place_id ?? item.osm_id ?? `${item.lat},${item.lon}`),
-        label: item.display_name,
-        lat: Number(item.lat),
-        lng: Number(item.lon),
-      }))
+      id: String(item.place_id ?? item.osm_id ?? `${item.lat},${item.lon}`),
+      label: item.display_name,
+      lat: Number(item.lat),
+      lng: Number(item.lon),
+    }))
     : [];
 }
