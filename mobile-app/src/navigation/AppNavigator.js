@@ -27,7 +27,8 @@ import LiveTrackingScreen from '../screens/LiveTrackingScreen';
 import TrackingScreen from '../screens/TrackingScreen';
 import ArrivedScreen from '../screens/ArrivedScreen';
 import ChatSupportScreen from '../screens/ChatSupportScreen';
-import AdminDashboardScreen from '../screens/AdminDashboardScreen';
+import UserProfileScreen from '../screens/UserProfileScreen';
+import TimeSlotScreen from '../screens/TimeSlotScreen';
 import theme from '../theme';
 
 // Stack navigator create karo
@@ -101,7 +102,8 @@ const AppNavigator = () => {
           <Stack.Screen name="Arrived" component={ArrivedScreen} />
           <Stack.Screen name="ArrivedScreen" component={ArrivedScreen} />
           <Stack.Screen name="ChatSupport" component={ChatSupportScreen} />
-          <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+          <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+          <Stack.Screen name="TimeSlot" component={TimeSlotScreen} />
         </Stack.Navigator>
       </NavigationContainer>
 
@@ -122,9 +124,9 @@ const AppNavigator = () => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.menuItem, styles.menuItemLast]}
-                onPress={() => navigateSafe('AdminDashboard')}
+                onPress={() => navigateSafe('UserProfile')}
               >
-                <Text style={styles.menuText}>Admin Dashboard</Text>
+                <Text style={styles.menuText}>My Profile</Text>
               </TouchableOpacity>
             </View>
           )}

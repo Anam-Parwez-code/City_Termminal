@@ -40,17 +40,41 @@ const STAGES = [
 ];
 
 const normalizeStatus = (value) => {
-  const raw = String(value || '').toLowerCase().replace(/\s+/g, '_');
+  const raw = String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+  if (!raw || raw === 'undefined') return 'dispatched';
   if (raw.includes('barcode')) return 'barcode_issued';
-  if (raw.includes('airport') && (raw.includes('arrived') || raw.includes('at_') || raw.includes('reached')))
-    return 'at_airport';
+
+  // Terminal arrival — strict (never treat "en_route_airport" as landed)
   if (
+    raw === 'at_airport' ||
+    raw.endsWith('_at_airport') ||
+    raw.includes('landed_at_terminal') ||
+    (raw.includes('arrived') &&
+      raw.includes('airport') &&
+      !raw.includes('pickup') &&
+      !raw.includes('en_route'))
+  ) {
+    return 'at_airport';
+  }
+
+  if (
+    raw === 'en_route_airport' ||
     raw.includes('en_route_airport') ||
     raw.includes('heading_to_airport') ||
-    raw.includes('picked_up')
-  )
+    (raw.includes('heading_to') && raw.includes('terminal'))
+  ) {
     return 'en_route_airport';
-  if (raw.includes('pickup') && (raw.includes('arrived') || raw.includes('reached'))) return 'arrived_pickup';
+  }
+
+  if (
+    (raw.includes('pickup') || raw.includes('passenger')) &&
+    (raw.includes('arrived') || raw.includes('reached') || raw.includes('waiting_for_vehicle'))
+  ) {
+    return 'arrived_pickup';
+  }
+
   if (raw.includes('en_route')) return 'en_route';
   return raw || 'dispatched';
 };
@@ -249,7 +273,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
         bookingId,
         vehicleId: enteredVehicleId.trim(),
       });
-      navigation.navigate('Barcode', {
+      navigation.navigate('UserProfile', {
         ...params,
         statusData: result.status,
         confirmation: {
@@ -329,7 +353,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <TouchableOpacity
             style={styles.barcodeBanner}
             onPress={() =>
-              navigation.navigate('Barcode', {
+              navigation.navigate('UserProfile', {
                 ...params,
                 statusData,
                 confirmation: {
@@ -371,6 +395,12 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <Text style={styles.detailLabel}>Destination</Text>
           <Text style={styles.detailValue}>{destinationTerminal}</Text>
         </View>
+
+        {normalizeStatus(statusData?.status) === 'dispatched' && (
+          <Text style={styles.flowHint}>
+            Flow: driver marks “en route” → “at pickup” on their app → you enter Vehicle ID → barcode → then airport leg.
+          </Text>
+        )}
 
         {statusData?.driverPhone ? (
           <View style={styles.driverCard}>
@@ -561,6 +591,19 @@ const styles = StyleSheet.create({
     borderColor: COLORS.line,
     marginTop: 18,
   },
+  flowHint: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#101215',
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
+
   verificationLabel: { color: COLORS.text, fontSize: 14, fontWeight: '800', marginBottom: 12 },
   verificationInputRow: { flexDirection: 'row', gap: 10 },
   verificationInput: {

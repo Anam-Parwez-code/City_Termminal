@@ -1,7 +1,19 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
+import * as L from 'leaflet';
 
 const clampZoom = (z) => Math.max(11, Math.min(17, z));
+
+function ensureLeafletCss() {
+  if (typeof document === 'undefined') return;
+  const id = 'leaflet-css-city-terminal';
+  if (document.getElementById(id)) return;
+  const link = document.createElement('link');
+  link.id = id;
+  link.rel = 'stylesheet';
+  link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(link);
+}
 
 export default forwardRef(function MapViewWeb(props, ref) {
   const { style, initialRegion, onRegionChangeComplete, children } = props;
@@ -23,53 +35,49 @@ export default forwardRef(function MapViewWeb(props, ref) {
 
   useEffect(() => {
     let cancelled = false;
+    ensureLeafletCss();
 
-    const boot = async () => {
-      const L = await import('leaflet');
-      await import('leaflet/dist/leaflet.css');
-      if (cancelled || !mountRef.current) return;
-
-      const start = seedRef.current || {
-        latitude: 25.2048,
-        longitude: 55.2708,
-        latitudeDelta: 0.0422,
-        longitudeDelta: 0.0221,
-      };
-
-      mapRef.current?.remove?.();
-      const latDelta = start.latitudeDelta || 0.0422;
-      const map = L.map(mountRef.current, {
-        center: [start.latitude, start.longitude],
-        zoom: clampZoom(Math.log2(560 / latDelta)),
-        zoomControl: true,
-      });
-      mapRef.current = map;
-
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap',
-      }).addTo(map);
-
-      const emit = () => {
-        const c = map.getCenter();
-        const b = map.getBounds();
-        onRegionChangeRef.current?.({
-          latitude: c.lat,
-          longitude: c.lng,
-          latitudeDelta: b.getNorth() - b.getSouth(),
-          longitudeDelta: b.getEast() - b.getWest(),
-        });
-      };
-
-      map.on('moveend', emit);
-      emit();
-      setTimeout(() => map.invalidateSize(), 120);
+    const start = seedRef.current || {
+      latitude: 25.2048,
+      longitude: 55.2708,
+      latitudeDelta: 0.0422,
+      longitudeDelta: 0.0221,
     };
 
-    boot();
+    if (!mountRef.current) return undefined;
+
+    mapRef.current?.remove?.();
+    const latDelta = start.latitudeDelta || 0.0422;
+    const map = L.map(mountRef.current, {
+      center: [start.latitude, start.longitude],
+      zoom: clampZoom(Math.log2(560 / latDelta)),
+      zoomControl: true,
+    });
+    mapRef.current = map;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap',
+    }).addTo(map);
+
+    const emit = () => {
+      const c = map.getCenter();
+      const b = map.getBounds();
+      onRegionChangeRef.current?.({
+        latitude: c.lat,
+        longitude: c.lng,
+        latitudeDelta: b.getNorth() - b.getSouth(),
+        longitudeDelta: b.getEast() - b.getWest(),
+      });
+    };
+
+    map.on('moveend', emit);
+    emit();
+    const t = setTimeout(() => !cancelled && map.invalidateSize(), 120);
 
     return () => {
       cancelled = true;
+      clearTimeout(t);
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;

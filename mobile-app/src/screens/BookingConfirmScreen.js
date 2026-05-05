@@ -49,7 +49,7 @@ const BookingConfirmScreen = ({ navigation, route }) => {
   const driverName = assignment.driverName || assignment.driver_name || 'Mohammed Al-Ali';
   const pickupLocation = params.pickupLocation?.name || assignment.pickupLocation || assignment.pickup_location || params.confirmation?.locationName;
   const destinationTerminal = params.destinationTerminal || assignment.destinationTerminal || assignment.destination_terminal;
-  const pickupTime = params.confirmation?.slotTime || assignment.pickupTime || assignment.slotTime;
+  const pickupTime = params.selectedTimeSlot ? `${params.selectedDate} ${params.selectedTimeSlot}` : (params.confirmation?.slotTime || assignment.pickupTime || assignment.slotTime);
 
   const callDriver = async () => {
     const url = `tel:${driverPhone}`;

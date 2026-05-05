@@ -109,36 +109,15 @@ const LocationPickScreen = ({ navigation, route }) => {
       return;
     }
 
-    setIsAssigning(true);
-    try {
-      const coordSuffix = `${region.latitude.toFixed(5)}, ${region.longitude.toFixed(5)}`;
-      const pickupName = pickupLabel?.trim()?.length ? `${pickupLabel.trim()} (${coordSuffix})` : coordSuffix;
+    const coordSuffix = `${region.latitude.toFixed(5)}, ${region.longitude.toFixed(5)}`;
+    const pickupName = pickupLabel?.trim()?.length ? `${pickupLabel.trim()} (${coordSuffix})` : coordSuffix;
 
-      const result = await apiService.assignVehicle({
-        bookingId,
-        pickupLocation: pickupName,
-        destinationTerminal: terminal,
-        pickupCoordinates: { lat: region.latitude, lng: region.longitude },
-      });
-
-      navigation.navigate('LiveTracking', {
-        ...params,
-        bookingId,
-        pickupLocation: { name: pickupName, lat: region.latitude, lng: region.longitude },
-        destinationTerminal: terminal,
-        vehicleAssignment: result.assignment,
-        confirmation: {
-          ...(params.confirmation || {}),
-          ...(result.assignment || {}),
-          locationName: pickupName,
-          destinationTerminal: terminal,
-        },
-      });
-    } catch (error) {
-      Alert.alert('Vehicle assignment failed', error.message || 'Please try again.');
-    } finally {
-      setIsAssigning(false);
-    }
+    navigation.navigate('TimeSlot', {
+      ...params,
+      bookingId,
+      pickupLocation: { name: pickupName, lat: region.latitude, lng: region.longitude },
+      destinationTerminal: terminal,
+    });
   };
 
   return (
