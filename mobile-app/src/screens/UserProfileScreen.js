@@ -157,8 +157,13 @@ const UserProfileScreen = ({ navigation, route }) => {
     ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status);
 
   const shouldShowBarcode =
-    isPostVerification && latestBooking.vehicleVerified === true;
-
+   
+  latestBooking &&
+  (
+    latestBooking.vehicleVerified === true ||
+    ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status)
+  ) &&
+  !!latestBooking.barcodeData;
   /**
    * Show the "Barcode Locked" card when a booking exists but the barcode is
    * not yet unlocked — driver hasn't confirmed the OTP step yet.
@@ -169,7 +174,9 @@ const UserProfileScreen = ({ navigation, route }) => {
   // ── Polling ───────────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-    if (!bookingId) { setLoading(false); return () => { mounted = false; }; }
+    if (!bookingId) 
+      { setLoading(false); 
+        return () => { mounted = false; }; }
 
     const fetchStatus = async () => {
       try {
@@ -179,11 +186,11 @@ const UserProfileScreen = ({ navigation, route }) => {
         // Server shape: { status: {...}, flight: {...} }
         const statusObj = result?.status || {};
         const assignmentObj = result?.assignment || {};
-
-        if (statusObj.status || assignmentObj.status) {
+                const newStatus = statusObj.status || assignmentObj.status;
+        if (newStatus) {
           setLatestBooking({
             bookingId,
-            status: statusObj.status || assignmentObj.status,
+            status: newStatus,
             vehicleVerified:
               statusObj.vehicleVerified ??
               statusObj.vehicle_verified ??

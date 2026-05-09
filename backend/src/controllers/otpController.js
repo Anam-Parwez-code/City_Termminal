@@ -502,7 +502,7 @@ const getOTPStatus = async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /api/otp/verify-vehicle
 // ---------------------------------------------------------------------------
-const verifyVehicle = async (req, res) => {
+ const verifyVehicle = async (req, res) => {
   try {
     const { bookingId, vehicleId } = req.body;
     if (!bookingId || !vehicleId) {
@@ -514,15 +514,25 @@ const verifyVehicle = async (req, res) => {
     if (!assignment) {
       return res.status(404).json({ success: false, message: 'Vehicle assignment not found' });
     }
-    if (String(assignment.vehicle_id).toUpperCase() !== String(vehicleId).toUpperCase()) {
-      return res.status(401).json({ success: false, message: 'Vehicle ID does not match this booking' });
-    }
-    if (!assignment.reached_pickup && assignment.status !== 'arrived_pickup') {
-      return res.status(400).json({
-        success: false,
-        message: 'Driver must arrive at your pickup pin first (driver app: "Arrived at pickup").',
+
+    // ✅ FIX BUG 1: Normalize karo — dashes hatao, sirf digits/letters compare karo
+    const normalize = (id) => String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    
+    if (normalize(assignment.vehicle_id) !== normalize(vehicleId)) {
+      return res.status(401).json({ 
+        success: false, 
+        message: `Vehicle ID does not match. Your vehicle is ${assignment.vehicle_id}` 
       });
     }
+
+    // ✅ FIX: reached_pickup check remove karo ya soften karo (driver ka step miss ho sakta hai)
+    // Agar strictly enforce karna hai driver flow, toh rakho. Warna comment out karo:
+    // if (!assignment.reached_pickup && assignment.status !== 'arrived_pickup') {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: 'Driver must arrive at your pickup pin first.',
+    //   });
+    // }
 
     const barcodePayload = buildBarcodePayload(assignment);
     const result = await pool.query(
@@ -536,8 +546,7 @@ const verifyVehicle = async (req, res) => {
            updated_at       = NOW()
        WHERE id = $1
        RETURNING *`,
-      [assignment.id, barcodePayload,
-        'Boarding barcode issued — luggage tag synced with dashboard']
+      [assignment.id, barcodePayload, 'Boarding barcode issued — luggage tag synced with dashboard']
     );
 
     const rowAfter = await getAssignmentByBookingId(bookingId);

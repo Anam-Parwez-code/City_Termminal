@@ -337,6 +337,8 @@ const LiveTrackingScreen = ({ navigation, route }) => {
             style={styles.barcodeBanner}
             onPress={() =>
               navigation.navigate('UserProfile', {
+                 bookingId: bookingId,
+                  
                 ...params,
                 statusData,
                 confirmation: {
