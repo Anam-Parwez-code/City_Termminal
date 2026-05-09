@@ -15,7 +15,7 @@ import theme from '../theme';
 
 const { height } = Dimensions.get('window');
 
-const SOCKET_URL = 'http://192.168.245.224:5000';
+const SOCKET_URL = 'http://192.168.141.224:5000';
 
 const PICKUP_LOCATION = {
   latitude: 25.1181,
