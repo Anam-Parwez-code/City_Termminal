@@ -20,6 +20,7 @@ import { loadDriverSession, saveDriverSession } from '../sessionStorage';
 export default function DriverTripScreen({ navigation }) {
   const [bookingId, setBookingId] = useState('');
   const [vehicleId, setVehicleId] = useState('');
+  const [passengerOtp, setPassengerOtp] = useState('');
   const [log, setLog] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [incomingAssignment, setIncomingAssignment] = useState(null);
@@ -148,6 +149,15 @@ export default function DriverTripScreen({ navigation }) {
 
   const verifyPassengerOTP = async () => {
     if (!requireIds()) return;
+    if (!passengerOtp.trim()) {
+      Alert.alert('Required', 'Enter the OTP (Vehicle ID) provided by the passenger.');
+      return;
+    }
+    if (passengerOtp.trim().toUpperCase() !== vehicleId.trim().toUpperCase()) {
+      Alert.alert('Invalid OTP', 'The OTP does not match your assigned Vehicle ID.');
+      return;
+    }
+    
     try {
       const result = await verifyPassengerVehicle({
         bookingId: bookingId.trim(),
@@ -333,9 +343,19 @@ export default function DriverTripScreen({ navigation }) {
           <Text style={styles.btnTxt}>2 · Arrived at pickup</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.btn, { backgroundColor: '#eab308' }]} onPress={verifyPassengerOTP}>
-          <Text style={[styles.btnTxt, { color: '#000' }]}>3 · Verify Passenger (OTP step)</Text>
-        </TouchableOpacity>
+        <View style={styles.otpCard}>
+          <Text style={styles.label}>Passenger OTP (Their Vehicle ID)</Text>
+          <TextInput
+            placeholder="Ask passenger for OTP"
+            value={passengerOtp}
+            onChangeText={setPassengerOtp}
+            autoCapitalize="characters"
+            style={styles.input}
+          />
+          <TouchableOpacity style={[styles.btn, { backgroundColor: '#eab308' }]} onPress={verifyPassengerOTP}>
+            <Text style={[styles.btnTxt, { color: '#000' }]}>3 · Verify Passenger (OTP step)</Text>
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity style={styles.btn} onPress={startSharing}>
           <Text style={styles.btnTxt}>Start live GPS (pickup ↔ airport)</Text>
@@ -471,4 +491,5 @@ const styles = StyleSheet.create({
   acceptTxt: { color: '#08100a', fontWeight: '900', fontSize: 16 },
   demoBtn: { backgroundColor: '#1f2937', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
   demoBtnTxt: { color: '#9ca3af', fontWeight: '800' },
+  otpCard: { backgroundColor: '#111827', padding: 16, borderRadius: 16, marginTop: 18, borderWidth: 1, borderColor: '#eab308' },
 });

@@ -275,7 +275,8 @@ const PassportScanScreen = ({ navigation, route }) => {
 
       {/* ── CAMERA VIEW ── */}
       {scanStep === 'guide' && (
-        <CameraView ref={cameraRef} style={styles.camera} facing="back">
+        <View style={styles.camera}>
+          <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
           <View style={styles.overlay}>
 
             {/* Camera Header */}
@@ -331,7 +332,7 @@ const PassportScanScreen = ({ navigation, route }) => {
 
             </View>
           </View>
-        </CameraView>
+        </View>
       )}
 
     </View>
