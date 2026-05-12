@@ -16,9 +16,9 @@ import axios from 'axios';
 // Windows: CMD → ipconfig → IPv4 Address
 // Mac/Linux: terminal → ifconfig
 // Mobile aur laptop EK HI WiFi pe hone chahiye!
-const BASE_URL = 'http://192.168.141.224:5000/api';
+const BASE_URL = 'http://10.33.77.224:5000/api';
 //                    ^^^^^^^^^^^ Yahan apna IP daalo
-const AI_BASE_URL = 'http://192.168.141.224:8000';
+const AI_BASE_URL = 'http://10.33.77.224:8000';
 
 export const getSocketBaseUrl = () => {
   const trimmed = BASE_URL.replace(/\/api\/?$/i, '').trim();

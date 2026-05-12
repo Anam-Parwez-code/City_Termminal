@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,22 +9,29 @@ import {
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useTranslation } from 'react-i18next';
+import { io } from 'socket.io-client';
 import apiService from '../services/apiService';
+
+// Derive socket origin from the same base URL apiService already uses.
+// This avoids importing ../config which may not exist in the passenger app.
+// apiService.defaults.baseURL is typically "http://host:port/api"
+// We strip the path to get just "http://host:port".
+const _apiBase = apiService?.defaults?.baseURL || '';
+const socketOrigin = _apiBase.replace(/\/api\/?.*$/, '') || 'http://localhost:3000';
 import theme from '../theme';
 
 const COLORS = {
-  bg: '#0A0A0B',
-  card: '#15171B',
-  line: '#2A2F36',
+  bg:    '#0A0A0B',
+  card:  '#15171B',
+  line:  '#2A2F36',
   green: theme.colors.careemGreen || '#47D361',
   amber: '#F5A623',
-  text: '#FFFFFF',
+  text:  '#FFFFFF',
   muted: '#A7B0C0',
 };
 
 const EMPTY = '-';
 
-/** Return first non-null, non-empty string from args. */
 const pick = (...values) =>
   values.find((v) => v != null && String(v).trim() !== '');
 
@@ -32,18 +39,14 @@ const pick = (...values) =>
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Format an ISO date string or Date object to a readable time + date. */
 const formatDeparture = (raw) => {
   if (!raw) return EMPTY;
   try {
     const d = new Date(raw);
     if (isNaN(d.getTime())) return String(raw);
     return d.toLocaleString([], {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
     });
   } catch (_e) {
     return String(raw);
@@ -76,143 +79,143 @@ const UserProfileScreen = ({ navigation, route }) => {
   const { i18n } = useTranslation();
   const isRTL = i18n.dir() === 'rtl';
 
-  const params = route?.params || {};
-  const bookingData = params.bookingData || {};
-  const statusParam = params.statusData || params.status || {};
+  const params       = route?.params || {};
+  const bookingData  = params.bookingData  || {};
+  const statusParam  = params.statusData || params.status || {};
   const confirmation = params.confirmation || {};
 
-  // ── Booking ID ──────────────────────────────────────────────────────────
+  // ── Booking ID ────────────────────────────────────────────────────────────
   const bookingId = pick(
     params.bookingId,
-    bookingData.bookingId,
-    bookingData.booking_id,
-    confirmation.bookingId,
-    confirmation.booking_id,
-    statusParam.bookingId,
-    statusParam.booking_id,
+    bookingData.bookingId,    bookingData.booking_id,
+    confirmation.bookingId,   confirmation.booking_id,
+    statusParam.bookingId,    statusParam.booking_id,
   ) || '';
 
-  // ── Passenger info (falls back to route params; server may enrich) ─────
+  // ── Passenger info ────────────────────────────────────────────────────────
   const passengerName = pick(
     params.passengerName,
-    confirmation.passengerName,
-    confirmation.passenger_name,
-    bookingData.passengerName,
-    bookingData.passenger_name,
-    bookingData.name,
-    bookingData.fullName,
-    bookingData.full_name,
-    bookingData.passenger?.name,
+    confirmation.passengerName,    confirmation.passenger_name,
+    bookingData.passengerName,     bookingData.passenger_name,
+    bookingData.name,              bookingData.fullName,
+    bookingData.full_name,         bookingData.passenger?.name,
     params.passportData?.name,
-    bookingData.verifiedName,
-    bookingData.verified_name,
+    bookingData.verifiedName,      bookingData.verified_name,
     'Passenger',
   );
 
   const passengerPhone = pick(
     params.passengerPhone,
-    confirmation.passengerPhone,
-    confirmation.passenger_phone,
-    bookingData.passengerPhone,
-    bookingData.passenger_phone,
-    bookingData.phone,
-    bookingData.phoneNumber,
-    bookingData.phone_number,
-    bookingData.mobile,
-    bookingData.passenger?.phone,
-    params.phone,
+    confirmation.passengerPhone,   confirmation.passenger_phone,
+    bookingData.passengerPhone,    bookingData.passenger_phone,
+    bookingData.phone,             bookingData.phoneNumber,
+    bookingData.phone_number,      bookingData.mobile,
+    bookingData.passenger?.phone,  params.phone,
     EMPTY,
   );
 
-  // ── Booking state ────────────────────────────────────────────────────────
+  // ── Booking state ─────────────────────────────────────────────────────────
   const [latestBooking, setLatestBooking] = useState(() => {
     const initial = { ...confirmation, ...statusParam };
     if (!bookingId && Object.keys(initial).length === 0) return null;
     return {
       bookingId,
-      status: initial.status,
-      vehicleVerified: initial.vehicleVerified ?? initial.vehicle_verified ?? false,
-      driverName: pick(initial.driverName, initial.driver_name, EMPTY),
-      driverPhone: pick(initial.driverPhone, initial.driver_phone, ''),
-      vehicleId: pick(initial.vehicleId, initial.vehicle_id, initial.vehicleNumber, EMPTY),
-      barcodeData: pick(initial.barcodeData, initial.barcode_data, null),
+      status:          initial.status,
+      vehicleVerified: initial.vehicleVerified === true || initial.vehicle_verified === true,
+      driverName:      pick(initial.driverName,  initial.driver_name,  EMPTY),
+      driverPhone:     pick(initial.driverPhone, initial.driver_phone, ''),
+      vehicleId:       pick(initial.vehicleId,   initial.vehicle_id, initial.vehicleNumber, EMPTY),
+      barcodeData:     pick(initial.barcodeData, initial.barcode_data, null),
     };
   });
 
-  // ── Flight block ─────────────────────────────────────────────────────────
-  const [flight, setFlight] = useState(
-    // Pre-fill from route params if the booking screen already has this data.
-    params.flight || null,
-  );
-
+  // ── Flight block ──────────────────────────────────────────────────────────
+  const [flight, setFlight] = useState(params.flight || null);
   const [loading, setLoading] = useState(!!bookingId);
+  const socketRef = useRef(null);
 
-  // ── Derived flags ─────────────────────────────────────────────────────────
-  /**
-   * Barcode is shown ONLY when:
-   *   1. vehicleVerified === true  (server flipped after driver OTP step)
-   *   2. status is one of the post-verification statuses
-   */
-  const isPostVerification = latestBooking &&
-    ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status);
+  // ---------------------------------------------------------------------------
+  // ★ applyStatusUpdate — single function called from BOTH poll and socket
+  //
+  // This ensures barcode unlocks the MOMENT the socket event fires,
+  // without waiting for the next 10-second poll.
+  // ---------------------------------------------------------------------------
+  const applyStatusUpdate = (statusObj, flightObj) => {
+    if (!statusObj) return;
 
-  const shouldShowBarcode =
-   
-  latestBooking &&
-  (
-    latestBooking.vehicleVerified === true ||
-    ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status)
-  ) &&
-  !!latestBooking.barcodeData;
-  /**
-   * Show the "Barcode Locked" card when a booking exists but the barcode is
-   * not yet unlocked — driver hasn't confirmed the OTP step yet.
-   */
-  const shouldShowLocked =
-    latestBooking && !shouldShowBarcode;
+    setLatestBooking((prev) => ({
+      ...(prev || {}),
+      bookingId:  statusObj.bookingId       || statusObj.booking_id  || bookingId,
+      status:     statusObj.status          || prev?.status,
+      // ★ Coerce to JS boolean — this is the fix
+      vehicleVerified:
+        statusObj.vehicleVerified === true  ||
+        statusObj.vehicle_verified === true ||
+        statusObj.vehicleVerified === 'true',
+      driverName:  pick(statusObj.driverName,  statusObj.driver_name,  prev?.driverName,  EMPTY),
+      driverPhone: pick(statusObj.driverPhone, statusObj.driver_phone, prev?.driverPhone, ''),
+      vehicleId:   pick(statusObj.vehicleId,   statusObj.vehicle_id,   prev?.vehicleId,   EMPTY),
+      // ★ barcodeData — prefer new value, fall back to existing
+      barcodeData: statusObj.barcodeData || statusObj.barcode_data || prev?.barcodeData || null,
+    }));
 
-  // ── Polling ───────────────────────────────────────────────────────────────
+    if (flightObj) setFlight(flightObj);
+  };
+
+  // ---------------------------------------------------------------------------
+  // ★ Socket listener — fires IMMEDIATELY when driver presses OTP button,
+  // so passenger barcode appears without waiting for next poll cycle.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!bookingId) return;
+
+    const socket = io(socketOrigin, { transports: ['websocket', 'polling'] });
+    socketRef.current = socket;
+
+    // Join the booking-specific room so we only get our own updates
+    socket.emit('join_booking', bookingId);
+
+    socket.on('status_update', (payload) => {
+      const payloadBookingId =
+        payload.bookingId || payload.booking_id || '';
+      // Only handle updates for our booking
+      if (
+        String(payloadBookingId).toUpperCase() !==
+        String(bookingId).toUpperCase()
+      ) return;
+
+      console.log('[UserProfile] socket status_update', payload);
+
+      // Socket payload may be flat (not nested under .status)
+      applyStatusUpdate(payload, payload.flight || null);
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingId]);
+
+  // ---------------------------------------------------------------------------
+  // Polling — every 10s as a safety net if socket misses an event
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     let mounted = true;
-    if (!bookingId) 
-      { setLoading(false); 
-        return () => { mounted = false; }; }
+    if (!bookingId) { setLoading(false); return () => { mounted = false; }; }
 
     const fetchStatus = async () => {
       try {
         const result = await apiService.getOTPStatus(bookingId);
         if (!mounted) return;
 
-        // Server shape: { status: {...}, flight: {...} }
+        // Server returns: { success, status: { vehicleVerified, barcodeData, ... }, flight }
         const statusObj = result?.status || {};
-        const assignmentObj = result?.assignment || {};
-                const newStatus = statusObj.status || assignmentObj.status;
-        if (newStatus) {
-          setLatestBooking({
-            bookingId,
-            status: newStatus,
-            vehicleVerified:
-              statusObj.vehicleVerified ??
-              statusObj.vehicle_verified ??
-              assignmentObj.vehicleVerified ??
-              assignmentObj.vehicle_verified ??
-              false,
-            driverName: pick(statusObj.driverName, statusObj.driver_name,
-              assignmentObj.driverName, assignmentObj.driver_name, EMPTY),
-            driverPhone: pick(statusObj.driverPhone, statusObj.driver_phone,
-              assignmentObj.driverPhone, assignmentObj.driver_phone, ''),
-            vehicleId: pick(statusObj.vehicleId, statusObj.vehicle_id,
-              assignmentObj.vehicleId, assignmentObj.vehicle_id, EMPTY),
-            barcodeData: pick(statusObj.barcodeData, statusObj.barcode_data,
-              assignmentObj.barcodeData, assignmentObj.barcode_data, null),
-          });
-        }
+        const flightObj = result?.flight || statusObj.flight || null;
 
-        // Merge flight block — prefer server data over stale route params.
-        const serverFlight = result?.flight || statusObj.flight || null;
-        if (serverFlight) setFlight(serverFlight);
+        applyStatusUpdate(statusObj, flightObj);
       } catch (err) {
-        console.log('Poll error UserProfile', err);
+        console.log('[UserProfile] Poll error', err);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -221,27 +224,51 @@ const UserProfileScreen = ({ navigation, route }) => {
     fetchStatus();
     const interval = setInterval(fetchStatus, 10_000);
     return () => { mounted = false; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
+
+  // ---------------------------------------------------------------------------
+  // Derived flags
+  // ---------------------------------------------------------------------------
+
+  // ★ Show barcode when:
+  //   vehicleVerified === true  (driver pressed OTP button)
+  //   AND barcodeData is present
+  // OR status is a post-verification state (belt-and-suspenders)
+  const shouldShowBarcode =
+    !!latestBooking &&
+    !!latestBooking.barcodeData &&
+    (
+      latestBooking.vehicleVerified === true ||
+      ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status)
+    );
+
+  // ★ Show locked card when booking exists but barcode not yet unlocked
+  const shouldShowLocked = !!latestBooking && !shouldShowBarcode;
 
   // ── QR value ──────────────────────────────────────────────────────────────
   const getBarcodeValue = () => {
     if (!latestBooking) return '';
     if (latestBooking.barcodeData) return String(latestBooking.barcodeData);
     return JSON.stringify({
-      bookingId: latestBooking.bookingId,
-      vehicleId: latestBooking.vehicleId,
+      bookingId:  latestBooking.bookingId,
+      vehicleId:  latestBooking.vehicleId,
       driverName: latestBooking.driverName,
-      issuedAt: new Date().toISOString(),
+      issuedAt:   new Date().toISOString(),
     });
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, isRTL && styles.rtlRow]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>{isRTL ? '->' : '<-'}</Text>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+          accessibilityLabel="Go back"
+        >
+          <Text style={styles.backText}>{isRTL ? '→' : '←'}</Text>
         </TouchableOpacity>
         <Text style={[styles.title, isRTL && styles.textRight]}>My Profile</Text>
       </View>
@@ -250,17 +277,17 @@ const UserProfileScreen = ({ navigation, route }) => {
 
         {/* Passenger Info */}
         <SectionCard title="Passenger Info">
-          <InfoRow label="Name" value={passengerName} />
+          <InfoRow label="Name"  value={passengerName} />
           <InfoRow label="Phone" value={passengerPhone} />
         </SectionCard>
 
-        {/* Flight Details — shown as soon as we have any flight data */}
+        {/* Flight Details — shown as soon as server returns flight data */}
         {flight && (
           <SectionCard title="Flight Details">
-            {flight.flightNumber && <InfoRow label="Flight" value={flight.flightNumber} />}
-            {flight.airline && <InfoRow label="Airline" value={flight.airline} />}
-            {flight.destination && <InfoRow label="Destination" value={flight.destination} />}
-            {flight.terminal && <InfoRow label="Terminal" value={flight.terminal} />}
+            {flight.flightNumber  && <InfoRow label="Flight"      value={flight.flightNumber} />}
+            {flight.airline       && <InfoRow label="Airline"     value={flight.airline} />}
+            {flight.destination   && <InfoRow label="Destination" value={flight.destination} />}
+            {flight.terminal      && <InfoRow label="Terminal"    value={flight.terminal} />}
             {flight.departureTime && (
               <InfoRow
                 label="Departure"
@@ -279,7 +306,7 @@ const UserProfileScreen = ({ navigation, route }) => {
             {latestBooking && (
               <SectionCard title={`Active Booking: ${latestBooking.bookingId || EMPTY}`}>
                 <InfoRow label="Vehicle Assigned" value={latestBooking.vehicleId} />
-                <InfoRow label="Driver" value={latestBooking.driverName} />
+                <InfoRow label="Driver"           value={latestBooking.driverName} />
                 <InfoRow
                   label="Status"
                   value={latestBooking.status || 'Scheduled'}
@@ -288,7 +315,7 @@ const UserProfileScreen = ({ navigation, route }) => {
               </SectionCard>
             )}
 
-            {/* ── Barcode unlocked ── */}
+            {/* ── Barcode UNLOCKED — vehicleVerified=true ── */}
             {shouldShowBarcode && (
               <View style={styles.barcodeCard}>
                 <Text style={styles.barcodeTitle}>Luggage Tag Barcode</Text>
@@ -307,12 +334,10 @@ const UserProfileScreen = ({ navigation, route }) => {
               </View>
             )}
 
-            {/* ── Barcode locked — driver hasn't confirmed OTP step yet ── */}
+            {/* ── Barcode LOCKED — waiting for driver OTP step ── */}
             {shouldShowLocked && (
               <View style={styles.lockedCard}>
-                {/* Lock icon (text fallback — swap for an icon library if desired) */}
                 <Text style={styles.lockIcon}>🔒</Text>
-
                 <Text style={styles.lockedTitle}>Barcode Locked</Text>
 
                 {latestBooking.vehicleId && latestBooking.vehicleId !== EMPTY ? (
@@ -349,7 +374,6 @@ const UserProfileScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -359,7 +383,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.line,
   },
-  rtlRow: { flexDirection: 'row-reverse' },
+  rtlRow:     { flexDirection: 'row-reverse' },
   backButton: {
     width: 44, height: 44, borderRadius: 14,
     backgroundColor: COLORS.card,
@@ -367,14 +391,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.line,
     marginRight: 16,
   },
-  backText: { color: COLORS.text, fontWeight: '900', fontSize: 18 },
-  title: { color: COLORS.text, fontSize: 24, fontWeight: '900' },
+  backText:  { color: COLORS.text, fontWeight: '900', fontSize: 18 },
+  title:     { color: COLORS.text, fontSize: 24, fontWeight: '900' },
   textRight: { textAlign: 'right', marginRight: 0, marginLeft: 16 },
 
-  // Layout
   content: { padding: 24, paddingBottom: 40 },
 
-  // Generic card
   card: {
     backgroundColor: COLORS.card,
     borderRadius: 20,
@@ -387,22 +409,18 @@ const styles = StyleSheet.create({
     color: COLORS.muted, fontSize: 13, fontWeight: '800',
     marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1,
   },
-  infoRow: {
-    flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12,
-  },
+  infoRow:   { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   infoLabel: { color: COLORS.muted, fontSize: 15, fontWeight: '600' },
-  infoValue: { color: COLORS.text, fontSize: 15, fontWeight: '800' },
+  infoValue: { color: COLORS.text,  fontSize: 15, fontWeight: '800' },
 
   // Barcode unlocked
   barcodeCard: {
     backgroundColor: COLORS.green,
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
-    marginTop: 10,
+    borderRadius: 24, padding: 24,
+    alignItems: 'center', marginTop: 10,
   },
   barcodeTitle: { color: '#08100A', fontSize: 20, fontWeight: '900', marginBottom: 6 },
-  barcodeDesc: {
+  barcodeDesc:  {
     color: '#163A1C', fontSize: 14, fontWeight: '700',
     textAlign: 'center', marginBottom: 20,
   },
@@ -417,13 +435,9 @@ const styles = StyleSheet.create({
   // Barcode locked
   lockedCard: {
     backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 24,
-    padding: 28,
-    marginTop: 10,
+    borderRadius: 24, padding: 28, marginTop: 10,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    borderStyle: 'dashed',
+    borderWidth: 1, borderColor: COLORS.line, borderStyle: 'dashed',
   },
   lockIcon: { fontSize: 36, marginBottom: 12 },
   lockedTitle: {
@@ -436,10 +450,8 @@ const styles = StyleSheet.create({
   vehicleIdPill: {
     backgroundColor: COLORS.card,
     borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 28,
-    borderWidth: 1,
-    borderColor: COLORS.amber,
+    paddingVertical: 10, paddingHorizontal: 28,
+    borderWidth: 1, borderColor: COLORS.amber,
     marginBottom: 16,
   },
   vehicleIdText: {
