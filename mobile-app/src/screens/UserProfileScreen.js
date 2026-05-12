@@ -140,28 +140,33 @@ const UserProfileScreen = ({ navigation, route }) => {
   // This ensures barcode unlocks the MOMENT the socket event fires,
   // without waiting for the next 10-second poll.
   // ---------------------------------------------------------------------------
-  const applyStatusUpdate = (statusObj, flightObj) => {
-    if (!statusObj) return;
+ const applyStatusUpdate = (statusObj, flightObj) => {
+  if (!statusObj) return;
 
-    setLatestBooking((prev) => ({
+  setLatestBooking((prev) => {
+    // Check if driver or backend sent the verified signal
+    const isVerified = 
+      statusObj.vehicleVerified === true || 
+      statusObj.vehicle_verified === true || 
+      statusObj.vehicleVerified === 'true' ||
+      statusObj.status === 'Barcode issued' || // Driver app sending this
+      statusObj.status === 'barcode_issued';
+
+    return {
       ...(prev || {}),
-      bookingId:  statusObj.bookingId       || statusObj.booking_id  || bookingId,
-      status:     statusObj.status          || prev?.status,
-      // ★ Coerce to JS boolean — this is the fix
-      vehicleVerified:
-        statusObj.vehicleVerified === true  ||
-        statusObj.vehicle_verified === true ||
-        statusObj.vehicleVerified === 'true',
-      driverName:  pick(statusObj.driverName,  statusObj.driver_name,  prev?.driverName,  EMPTY),
+      bookingId:  statusObj.bookingId || statusObj.booking_id || bookingId,
+      status:     statusObj.status || prev?.status,
+      vehicleVerified: isVerified,
+      driverName:  pick(statusObj.driverName, statusObj.driver_name, prev?.driverName, EMPTY),
       driverPhone: pick(statusObj.driverPhone, statusObj.driver_phone, prev?.driverPhone, ''),
-      vehicleId:   pick(statusObj.vehicleId,   statusObj.vehicle_id,   prev?.vehicleId,   EMPTY),
-      // ★ barcodeData — prefer new value, fall back to existing
+      vehicleId:   pick(statusObj.vehicleId, statusObj.vehicle_id, prev?.vehicleId, EMPTY),
+      // Ensure barcode data is picked from any possible key
       barcodeData: statusObj.barcodeData || statusObj.barcode_data || prev?.barcodeData || null,
-    }));
+    };
+  });
 
-    if (flightObj) setFlight(flightObj);
-  };
-
+  if (flightObj) setFlight(flightObj);
+};
   // ---------------------------------------------------------------------------
   // ★ Socket listener — fires IMMEDIATELY when driver presses OTP button,
   // so passenger barcode appears without waiting for next poll cycle.
@@ -235,15 +240,14 @@ const UserProfileScreen = ({ navigation, route }) => {
   //   vehicleVerified === true  (driver pressed OTP button)
   //   AND barcodeData is present
   // OR status is a post-verification state (belt-and-suspenders)
-  const shouldShowBarcode =
-    !!latestBooking &&
-    !!latestBooking.barcodeData &&
-    (
-      latestBooking.vehicleVerified === true ||
-      ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status)
-    );
-
-  // ★ Show locked card when booking exists but barcode not yet unlocked
+ const shouldShowBarcode =
+  !!latestBooking &&
+  !!latestBooking.barcodeData && // Barcode data hona zaroori hai
+  (
+    latestBooking.vehicleVerified === true ||
+    latestBooking.status === 'Barcode issued' || // Matches Driver app EXACT string
+    ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status?.toLowerCase())
+  );  // ★ Show locked card when booking exists but barcode not yet unlocked
   const shouldShowLocked = !!latestBooking && !shouldShowBarcode;
 
   // ── QR value ──────────────────────────────────────────────────────────────
