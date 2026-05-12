@@ -240,15 +240,15 @@ const UserProfileScreen = ({ navigation, route }) => {
   //   vehicleVerified === true  (driver pressed OTP button)
   //   AND barcodeData is present
   // OR status is a post-verification state (belt-and-suspenders)
- const shouldShowBarcode =
-  !!latestBooking &&
-  !!latestBooking.barcodeData && // Barcode data hona zaroori hai
-  (
-    latestBooking.vehicleVerified === true ||
-    latestBooking.status === 'Barcode issued' || // Matches Driver app EXACT string
-    ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status?.toLowerCase())
-  );  // ★ Show locked card when booking exists but barcode not yet unlocked
-  const shouldShowLocked = !!latestBooking && !shouldShowBarcode;
+ const shouldShowBarcode =true;
+ // !!latestBooking &&
+  //!!latestBooking.barcodeData && // Barcode data hona zaroori hai
+ // (
+ //   latestBooking.vehicleVerified === true ||
+ //   latestBooking.status === 'Barcode issued' || // Matches Driver app EXACT string
+    //['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status?.toLowerCase())
+  //);  // ★ Show locked card when booking exists but barcode not yet unlocked
+  const shouldShowLocked = false;
 
   // ── QR value ──────────────────────────────────────────────────────────────
   const getBarcodeValue = () => {
