@@ -232,10 +232,7 @@ const toClientStatus = (row, statusOverride, flight = null) => {
   const status = statusOverride || row.status || 'dispatched';
 
   // ★ Explicit coercion — never let this be null/undefined/string
-  const vehicleVerified =
-    row.vehicle_verified === true  ||
-    row.vehicle_verified === 'true' ||
-    row.vehicleVerified  === true;
+  const vehicleVerified =!!row.vehicle_verified && (row.vehicle_verified === true || row.vehicle_verified === 'true' || row.vehicle_verified === 1);
 
   return {
     id:              row.id,

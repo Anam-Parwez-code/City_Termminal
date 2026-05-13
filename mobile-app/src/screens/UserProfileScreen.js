@@ -235,29 +235,25 @@ const UserProfileScreen = ({ navigation, route }) => {
   //   vehicleVerified === true  (driver pressed OTP button)
   //   AND barcodeData is present
   // OR status is a post-verification state (belt-and-suspenders)
-  const shouldShowBarcode =
-    !!latestBooking &&
-    !!latestBooking.barcodeData &&
-    (
-      latestBooking.vehicleVerified === true ||
-      ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status)
-    );
+  const shouldShowBarcode =!!latestBooking && !!latestBooking.barcodeData;
+    //!!latestBooking &&
+    //!!latestBooking.barcodeData &&
+    //(
+    //  latestBooking.vehicleVerified === true ||
+    //  ['barcode_issued', 'en_route_airport', 'at_airport'].includes(latestBooking.status)
+   // );
 
   // ★ Show locked card when booking exists but barcode not yet unlocked
-  const shouldShowLocked = !!latestBooking && !shouldShowBarcode;
+  const shouldShowLocked =!!latestBooking && !latestBooking.barcodeData;
 
   // ── QR value ──────────────────────────────────────────────────────────────
   const getBarcodeValue = () => {
-    if (!latestBooking) return '';
-    if (latestBooking.barcodeData) return String(latestBooking.barcodeData);
-    return JSON.stringify({
-      bookingId:  latestBooking.bookingId,
-      vehicleId:  latestBooking.vehicleId,
-      driverName: latestBooking.driverName,
-      issuedAt:   new Date().toISOString(),
-    });
+   if (latestBooking?.barcodeData) {
+      return String(latestBooking.barcodeData);
+    }
+    // Fallback taaki crash na ho agar data missing ho
+    return "PENDING"; 
   };
-
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
