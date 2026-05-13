@@ -178,7 +178,7 @@ const UserProfileScreen = ({ navigation, route }) => {
     socketRef.current = socket;
 
     // Join the booking-specific room so we only get our own updates
-    socket.emit('join_booking', bookingId);
+    socket.emit('join', { room: 'booking:' + bookingId });
 
     socket.on('status_update', (payload) => {
       const payloadBookingId =
