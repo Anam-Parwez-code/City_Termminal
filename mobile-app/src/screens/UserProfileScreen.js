@@ -91,6 +91,8 @@ const UserProfileScreen = ({ navigation, route }) => {
     confirmation.bookingId,   confirmation.booking_id,
     statusParam.bookingId,    statusParam.booking_id,
   ) || '';
+  console.log("Current Booking ID in Profile:", bookingId); 
+  console.log("Full Params received:", params); // Ye bhi check karlo agar ID khali hai
 
   // ── Passenger info ────────────────────────────────────────────────────────
   const passengerName = pick(
@@ -210,21 +212,22 @@ const UserProfileScreen = ({ navigation, route }) => {
     if (!bookingId) { setLoading(false); return () => { mounted = false; }; }
 
     const fetchStatus = async () => {
-      try {
-        const result = await apiService.getOTPStatus(bookingId);
-        if (!mounted) return;
+  try {
+    const result = await apiService.getOTPStatus(bookingId);
+    console.log("API Result Status:", result); // Debugging ke liye
+    if (!mounted) return;
 
-        // Server returns: { success, status: { vehicleVerified, barcodeData, ... }, flight }
-        const statusObj = result?.status || {};
-        const flightObj = result?.flight || statusObj.flight || null;
+    const statusObj = result?.status || {};
+    const flightObj = result?.flight || statusObj.flight || null;
 
-        applyStatusUpdate(statusObj, flightObj);
-      } catch (err) {
-        console.log('[UserProfile] Poll error', err);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
+    applyStatusUpdate(statusObj, flightObj);
+  } catch (err) {
+    console.log('[UserProfile] Poll error:', err.message);
+  } finally {
+    // ⭐ Yeh line sabse important hai blank screen hatane ke liye
+    if (mounted) setLoading(false); 
+  }
+};
 
     fetchStatus();
     const interval = setInterval(fetchStatus, 10_000);
@@ -323,12 +326,16 @@ const getBarcodeValue = () => {
                   Your driver verified the Vehicle ID. Show this barcode as proof of tagging.
                 </Text>
                 <View style={styles.qrWrapper}>
-                  <QRCode
-                    value={getBarcodeValue()}
-                    size={200}
-                    backgroundColor="#FFFFFF"
-                    color="#0A0A0B"
-                  />
+                  {getBarcodeValue() ? (
+  <QRCode
+    value={getBarcodeValue()}
+    size={200}
+    backgroundColor="#FFFFFF"
+    color="#0A0A0B"
+  />
+) : (
+  <ActivityIndicator size="small" color="#000" />
+)}
                 </View>
                 <Text style={styles.qrCaption}>Scan at Airport Counter</Text>
               </View>
