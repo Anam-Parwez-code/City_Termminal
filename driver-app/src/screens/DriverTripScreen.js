@@ -207,9 +207,11 @@ export default function DriverTripScreen({ navigation }) {
       socket.emit('status_update', {
         bookingId: bookingId.trim(),
         booking_id: bookingId.trim(),
-        vehicleId: vehicleId.trim(),
         vehicle_number: vehicleId.trim(),
-        status: 'En route to Airport',
+        vehicleId: vehicleId.trim(),
+        status: 'Barcode issued',
+        vehicleVerified: true, // 👈 Yeh add kar do
+        barcode_data: result?.status?.barcodeData || result?.status?.barcode_data,
         updated_at: new Date().toISOString(),
       });
       append('Marked heading to airport ✓');

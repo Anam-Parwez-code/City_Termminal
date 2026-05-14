@@ -183,8 +183,25 @@ const UserProfileScreen = ({ navigation, route }) => {
     // Join the booking-specific room so we only get our own updates
     socket.emit('join', { room: 'booking:' + bookingId });
 
-    socket.on('status_update', (payload) => {
-      const payloadBookingId =
+    socket.on('status_update', (data) => {
+  console.log("Socket Update Received in Profile:", data);
+
+  // 1. Pehle check karo ki data isi booking ka hai ya nahi
+  const incomingId = data.bookingId || data.booking_id || '';
+  
+  if (String(incomingId).toUpperCase() === String(currentBookingId).toUpperCase()) {
+    // 2. State update karo
+    setLatestBooking(prev => ({
+      ...prev,
+      status: data.status,
+      // Status 'Barcode issued' hote hi ya flag true hote hi unlock
+      vehicleVerified: data.vehicleVerified || data.status === 'Barcode issued' || data.status === 'at_airport',
+      barcodeData: data.barcode_data || data.barcodeData || prev.barcodeData,
+      statusLabel: data.statusLabel || data.status
+    }));
+  }
+});
+     /* const payloadBookingId =
         payload.bookingId || payload.booking_id || '';
       // Only handle updates for our booking
       if (
@@ -196,7 +213,7 @@ const UserProfileScreen = ({ navigation, route }) => {
 
       // Socket payload may be flat (not nested under .status)
       applyStatusUpdate(payload, payload.flight || null);
-    });
+    });*/
 
     return () => {
       socket.disconnect();
@@ -244,12 +261,11 @@ const UserProfileScreen = ({ navigation, route }) => {
   //   vehicleVerified === true  (driver pressed OTP button)
   //   AND barcodeData is present
   // OR status is a post-verification state (belt-and-suspenders)
-  const shouldShowBarcode =!!latestBooking?.barcodeData ;
-    
+  const shouldShowBarcode =    latestBooking?.vehicleVerified === true && 
+  !!latestBooking?.barcodeData;
 
   // ★ Show locked card when booking exists but barcode not yet unlocked
-  const shouldShowLocked = !!latestBooking && !latestBooking.barcodeData;
-
+  const shouldShowLocked = !latestBooking?.vehicleVerified || !latestBooking?.barcodeData;
   // ── QR value ──────────────────────────────────────────────────────────────
   // Line 249 ke paas isey paste karein
 const getBarcodeValue = () => {
