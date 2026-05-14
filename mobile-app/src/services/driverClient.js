@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Update when testing on devices to match passenger app IP
-const API_BASE_URL = 'http://10.33.77.224:5000/api';
+const API_BASE_URL = 'http://192.168.149.224:5000/api';
 
 const client = axios.create({
   baseURL: API_BASE_URL,

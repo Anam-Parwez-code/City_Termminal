@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const BASE_URL = 'http://10.33.77.224:5000/api';
+const BASE_URL = 'http://192.168.149.224:5000/api';
 const TOKEN_KEY = 'city_terminal_admin_token';
 const CURRENT_BOOKING_KEY = 'city_terminal_current_booking_id';
 

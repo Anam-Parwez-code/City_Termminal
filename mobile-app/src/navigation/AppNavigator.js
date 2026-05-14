@@ -32,7 +32,6 @@ import TimeSlotScreen from '../screens/TimeSlotScreen';
 import DriverTripScreen from '../screens/DriverTripScreen';
 import DriverProfileScreen from '../screens/DriverProfileScreen';
 import theme from '../theme';
-
 // Stack navigator create karo
 // Stack = stack of screens — jaise cards ka dhair
 const Stack = createNativeStackNavigator();
@@ -108,7 +107,7 @@ const AppNavigator = () => {
           <Stack.Screen name="TimeSlot" component={TimeSlotScreen} />
           <Stack.Screen name="DriverTrip" component={DriverTripScreen} />
           <Stack.Screen name="DriverProfile" component={DriverProfileScreen} />
-        </Stack.Navigator>
+                </Stack.Navigator>
       </NavigationContainer>
 
       {showControls && (

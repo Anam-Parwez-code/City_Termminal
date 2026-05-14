@@ -247,13 +247,17 @@ const UserProfileScreen = ({ navigation, route }) => {
   const shouldShowLocked = !!latestBooking && !latestBooking.barcodeData;
 
   // ── QR value ──────────────────────────────────────────────────────────────
-  const getBarcodeValue = () => {
-   if (latestBooking?.barcodeData) {
-      return String(latestBooking.barcodeData);
-    }
-    // Fallback taaki crash na ho agar data missing ho
-    return "PENDING"; 
-  };
+  // Line 249 ke paas isey paste karein
+const getBarcodeValue = () => {
+  if (latestBooking?.barcodeData) {
+    // Agar data string hai (jaisa Postman mein dikha), toh usey wahi rehne dein.
+    // Agar object hai, toh String mein badlein taaki QR code crash na ho.
+    return typeof latestBooking.barcodeData === 'object' 
+      ? JSON.stringify(latestBooking.barcodeData) 
+      : String(latestBooking.barcodeData);
+  }
+  return "PENDING";
+};
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>

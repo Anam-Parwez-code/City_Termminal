@@ -57,7 +57,7 @@ const AuthScreen = ({ navigation }) => {
       }
 
       const currentBookingId = await adminService.getCurrentBookingId();
-      navigation.replace(currentBookingId ? 'AdminDashboard' : 'BookingEntry');
+      navigation.replace('BookingEntry');
     } catch (err) {
       const message = err?.response?.data?.message || err.message || 'Please try again';
       Alert.alert(mode === 'signup' ? 'Create account failed' : 'Login failed', message);
