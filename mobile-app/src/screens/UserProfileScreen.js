@@ -83,6 +83,7 @@ const UserProfileScreen = ({ navigation, route }) => {
   const bookingData  = params.bookingData  || {};
   const statusParam  = params.statusData || params.status || {};
   const confirmation = params.confirmation || {};
+  //const bookingId = 'EK123456'; // pick(
 
   // ── Booking ID ────────────────────────────────────────────────────────────
   const bookingId = pick(

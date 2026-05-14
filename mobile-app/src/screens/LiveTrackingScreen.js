@@ -336,6 +336,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <TouchableOpacity
             style={styles.barcodeBanner}
             onPress={() =>
+              
               navigation.navigate('UserProfile', {
                  bookingId: bookingId,
                   

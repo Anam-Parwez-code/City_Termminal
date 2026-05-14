@@ -137,9 +137,12 @@ const AppNavigator = () => {
               <TouchableOpacity
                 style={[styles.menuItem, styles.menuItemLast]}
                 onPress={() => {
+                  setMenuOpen(false);
                   // Wait, AdminDashboard has no profile. But let's just go to UserProfile for general case.
                   // If we wanted strictly role-based profile:
-                  navigateSafe('UserProfile');
+                  navigateSafe('UserProfile', { 
+      bookingId: bookingIdRef.current 
+    });
                 }}
               >
                 <Text style={styles.menuText}>My Profile</Text>
