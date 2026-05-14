@@ -189,7 +189,7 @@ const UserProfileScreen = ({ navigation, route }) => {
   // 1. Pehle check karo ki data isi booking ka hai ya nahi
   const incomingId = data.bookingId || data.booking_id || '';
   
-  if (String(incomingId).toUpperCase() === String(currentBookingId).toUpperCase()) {
+  if (String(incomingId).toUpperCase() === String(bookingId).toUpperCase()) {
     // 2. State update karo
     setLatestBooking(prev => ({
       ...prev,
