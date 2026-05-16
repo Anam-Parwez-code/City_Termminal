@@ -11,14 +11,11 @@ import QRCode from 'react-native-qrcode-svg';
 import { useTranslation } from 'react-i18next';
 import { io } from 'socket.io-client';
 import apiService from '../services/apiService';
+import theme from '../theme';
 
 // Derive socket origin from the same base URL apiService already uses.
-// This avoids importing ../config which may not exist in the passenger app.
-// apiService.defaults.baseURL is typically "http://host:port/api"
-// We strip the path to get just "http://host:port".
 const _apiBase = apiService?.defaults?.baseURL || '';
 const socketOrigin = _apiBase.replace(/\/api\/?.*$/, '') || 'http://localhost:3000';
-import theme from '../theme';
 
 const COLORS = {
   bg:    '#0A0A0B',
@@ -38,7 +35,6 @@ const pick = (...values) =>
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
 const formatDeparture = (raw) => {
   if (!raw) return EMPTY;
   try {
@@ -56,7 +52,6 @@ const formatDeparture = (raw) => {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-
 const InfoRow = ({ label, value, valueStyle }) => (
   <View style={styles.infoRow}>
     <Text style={styles.infoLabel}>{label}</Text>
@@ -72,9 +67,8 @@ const SectionCard = ({ title, children }) => (
 );
 
 // ---------------------------------------------------------------------------
-// Screen
+// Main Screen Component
 // ---------------------------------------------------------------------------
-
 const UserProfileScreen = ({ navigation, route }) => {
   const { i18n } = useTranslation();
   const isRTL = i18n.dir() === 'rtl';
@@ -83,7 +77,6 @@ const UserProfileScreen = ({ navigation, route }) => {
   const bookingData  = params.bookingData  || {};
   const statusParam  = params.statusData || params.status || {};
   const confirmation = params.confirmation || {};
-  //const bookingId = 'EK123456'; // pick(
 
   // ── Booking ID ────────────────────────────────────────────────────────────
   const bookingId = pick(
@@ -92,8 +85,9 @@ const UserProfileScreen = ({ navigation, route }) => {
     confirmation.bookingId,   confirmation.booking_id,
     statusParam.bookingId,    statusParam.booking_id,
   ) || '';
+  
   console.log("Current Booking ID in Profile:", bookingId); 
-  console.log("Full Params received:", params); // Ye bhi check karlo agar ID khali hai
+  console.log("Full Params received:", params);
 
   // ── Passenger info ────────────────────────────────────────────────────────
   const passengerName = pick(
@@ -123,8 +117,8 @@ const UserProfileScreen = ({ navigation, route }) => {
     if (!bookingId && Object.keys(initial).length === 0) return null;
     return {
       bookingId,
-      status:          initial.status,
-      vehicleVerified: initial.vehicleVerified === true || initial.vehicle_verified === true,
+      status:          initial.status || 'Scheduled',
+      vehicleVerified: initial.vehicleVerified === true || initial.vehicle_verified === true || false,
       driverName:      pick(initial.driverName,  initial.driver_name,  EMPTY),
       driverPhone:     pick(initial.driverPhone, initial.driver_phone, ''),
       vehicleId:       pick(initial.vehicleId,   initial.vehicle_id, initial.vehicleNumber, EMPTY),
@@ -139,40 +133,59 @@ const UserProfileScreen = ({ navigation, route }) => {
 
   // ---------------------------------------------------------------------------
   // ★ applyStatusUpdate — single function called from BOTH poll and socket
-  //
-  // This ensures barcode unlocks the MOMENT the socket event fires,
-  // without waiting for the next 10-second poll.
   // ---------------------------------------------------------------------------
- const applyStatusUpdate = (statusObj, flightObj) => {
-  if (!statusObj) return;
+  const applyStatusUpdate = (statusObj, flightObj) => {
+    if (!statusObj) return;
 
-  setLatestBooking((prev) => {
-    // Check if driver or backend sent the verified signal
-    const isVerified = 
-      statusObj.vehicleVerified === true || 
-      statusObj.vehicle_verified === true || 
-      statusObj.vehicleVerified === 'true' ||
-      statusObj.status === 'Barcode issued' || // Driver app sending this
-      statusObj.status === 'barcode_issued';
+    setLatestBooking((prev) => {
+      // Check if driver or backend sent the verified signal
+      const isVerified = 
+        statusObj.vehicleVerified === true || 
+        statusObj.vehicle_verified === true || 
+        statusObj.vehicleVerified === 'true' ||
+        statusObj.status === 'Barcode issued' || 
+        statusObj.status === 'barcode_issued' ||
+        statusObj.status === 'at_airport';
 
-    return {
-      ...(prev || {}),
-      bookingId:  statusObj.bookingId || statusObj.booking_id || bookingId,
-      status:     statusObj.status || prev?.status,
-      vehicleVerified: isVerified,
-      driverName:  pick(statusObj.driverName, statusObj.driver_name, prev?.driverName, EMPTY),
-      driverPhone: pick(statusObj.driverPhone, statusObj.driver_phone, prev?.driverPhone, ''),
-      vehicleId:   pick(statusObj.vehicleId, statusObj.vehicle_id, prev?.vehicleId, EMPTY),
-      // Ensure barcode data is picked from any possible key
-      barcodeData: statusObj.barcodeData || statusObj.barcode_data || prev?.barcodeData || null,
-    };
-  });
+      return {
+        ...(prev || {}),
+        bookingId:       statusObj.bookingId || statusObj.booking_id || bookingId,
+        status:          statusObj.status || prev?.status,
+        vehicleVerified: isVerified,
+        driverName:      pick(statusObj.driverName, statusObj.driver_name, prev?.driverName, EMPTY),
+        driverPhone:     pick(statusObj.driverPhone, statusObj.driver_phone, prev?.driverPhone, ''),
+        vehicleId:       pick(statusObj.vehicleId, statusObj.vehicle_id, prev?.vehicleId, EMPTY),
+        barcodeData:     statusObj.barcodeData || statusObj.barcode_data || prev?.barcodeData || null,
+      };
+    });
 
-  if (flightObj) setFlight(flightObj);
-};
+    if (flightObj) setFlight(flightObj);
+  };
+
   // ---------------------------------------------------------------------------
-  // ★ Socket listener — fires IMMEDIATELY when driver presses OTP button,
-  // so passenger barcode appears without waiting for next poll cycle.
+  // ★ 1. RESET STATE ON BOOKING ID CHANGE — Locks barcode for fresh testing IDs
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (bookingId) {
+      setLatestBooking((prev) => {
+        if (prev?.bookingId !== bookingId) {
+          return {
+            bookingId,
+            status: 'Scheduled',
+            vehicleVerified: false, // Strict Initial Lock
+            driverName: EMPTY,
+            driverPhone: '',
+            vehicleId: EMPTY,
+            barcodeData: null,
+          };
+        }
+        return prev;
+      });
+    }
+  }, [bookingId]);
+
+  // ---------------------------------------------------------------------------
+  // ★ 2. Socket listener — fires IMMEDIATELY when driver presses OTP button
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!bookingId) return;
@@ -180,40 +193,16 @@ const UserProfileScreen = ({ navigation, route }) => {
     const socket = io(socketOrigin, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
-    // Join the booking-specific room so we only get our own updates
     socket.emit('join', { room: 'booking:' + bookingId });
 
     socket.on('status_update', (data) => {
-  console.log("Socket Update Received in Profile:", data);
-
-  // 1. Pehle check karo ki data isi booking ka hai ya nahi
-  const incomingId = data.bookingId || data.booking_id || '';
-  
-  if (String(incomingId).toUpperCase() === String(bookingId).toUpperCase()) {
-    // 2. State update karo
-    setLatestBooking(prev => ({
-      ...prev,
-      status: data.status,
-      // Status 'Barcode issued' hote hi ya flag true hote hi unlock
-      vehicleVerified: data.vehicleVerified || data.status === 'Barcode issued' || data.status === 'at_airport',
-      barcodeData: data.barcode_data || data.barcodeData || prev.barcodeData,
-      statusLabel: data.statusLabel || data.status
-    }));
-  }
-});
-     /* const payloadBookingId =
-        payload.bookingId || payload.booking_id || '';
-      // Only handle updates for our booking
-      if (
-        String(payloadBookingId).toUpperCase() !==
-        String(bookingId).toUpperCase()
-      ) return;
-
-      console.log('[UserProfile] socket status_update', payload);
-
-      // Socket payload may be flat (not nested under .status)
-      applyStatusUpdate(payload, payload.flight || null);
-    });*/
+      console.log("Socket Update Received in Profile:", data);
+      const incomingId = data.bookingId || data.booking_id || '';
+      
+      if (String(incomingId).toUpperCase() === String(bookingId).toUpperCase()) {
+        applyStatusUpdate(data, data.flight || null);
+      }
+    });
 
     return () => {
       socket.disconnect();
@@ -223,29 +212,28 @@ const UserProfileScreen = ({ navigation, route }) => {
   }, [bookingId]);
 
   // ---------------------------------------------------------------------------
-  // Polling — every 10s as a safety net if socket misses an event
+  // ★ 3. Polling — fallback safety net every 10s
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let mounted = true;
     if (!bookingId) { setLoading(false); return () => { mounted = false; }; }
 
     const fetchStatus = async () => {
-  try {
-    const result = await apiService.getOTPStatus(bookingId);
-    console.log("API Result Status:", result); // Debugging ke liye
-    if (!mounted) return;
+      try {
+        const result = await apiService.getOTPStatus(bookingId);
+        console.log("API Result Status:", result);
+        if (!mounted) return;
 
-    const statusObj = result?.status || {};
-    const flightObj = result?.flight || statusObj.flight || null;
+        const statusObj = result?.status || {};
+        const flightObj = result?.flight || statusObj.flight || null;
 
-    applyStatusUpdate(statusObj, flightObj);
-  } catch (err) {
-    console.log('[UserProfile] Poll error:', err.message);
-  } finally {
-    // ⭐ Yeh line sabse important hai blank screen hatane ke liye
-    if (mounted) setLoading(false); 
-  }
-};
+        applyStatusUpdate(statusObj, flightObj);
+      } catch (err) {
+        console.log('[UserProfile] Poll error:', err.message);
+      } finally {
+        if (mounted) setLoading(false); 
+      }
+    };
 
     fetchStatus();
     const interval = setInterval(fetchStatus, 10_000);
@@ -254,30 +242,22 @@ const UserProfileScreen = ({ navigation, route }) => {
   }, [bookingId]);
 
   // ---------------------------------------------------------------------------
-  // Derived flags
+  // Derived flags for visibility
   // ---------------------------------------------------------------------------
+  const shouldShowBarcode = latestBooking?.vehicleVerified === true && !!latestBooking?.barcodeData;
 
-  // ★ Show barcode when:
-  //   vehicleVerified === true  (driver pressed OTP button)
-  //   AND barcodeData is present
-  // OR status is a post-verification state (belt-and-suspenders)
-  const shouldShowBarcode =    latestBooking?.vehicleVerified === true && 
-  !!latestBooking?.barcodeData;
+  const shouldShowLocked = !latestBooking || latestBooking?.vehicleVerified !== true || !latestBooking?.barcodeData;
 
-  // ★ Show locked card when booking exists but barcode not yet unlocked
-  const shouldShowLocked = !latestBooking?.vehicleVerified || !latestBooking?.barcodeData;
-  // ── QR value ──────────────────────────────────────────────────────────────
-  // Line 249 ke paas isey paste karein
-const getBarcodeValue = () => {
-  if (latestBooking?.barcodeData) {
-    // Agar data string hai (jaisa Postman mein dikha), toh usey wahi rehne dein.
-    // Agar object hai, toh String mein badlein taaki QR code crash na ho.
-    return typeof latestBooking.barcodeData === 'object' 
-      ? JSON.stringify(latestBooking.barcodeData) 
-      : String(latestBooking.barcodeData);
-  }
-  return "PENDING";
-};
+  // ── QR value parsing ───────────────────────────────────────────────────────
+  const getBarcodeValue = () => {
+    if (latestBooking?.barcodeData) {
+      return typeof latestBooking.barcodeData === 'object' 
+        ? JSON.stringify(latestBooking.barcodeData) 
+        : String(latestBooking.barcodeData);
+    }
+    return "PENDING";
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
@@ -301,7 +281,7 @@ const getBarcodeValue = () => {
           <InfoRow label="Phone" value={passengerPhone} />
         </SectionCard>
 
-        {/* Flight Details — shown as soon as server returns flight data */}
+        {/* Flight Details */}
         {flight && (
           <SectionCard title="Flight Details">
             {flight.flightNumber  && <InfoRow label="Flight"      value={flight.flightNumber} />}
@@ -335,7 +315,7 @@ const getBarcodeValue = () => {
               </SectionCard>
             )}
 
-            {/* ── Barcode UNLOCKED — vehicleVerified=true ── */}
+            {/* ── Barcode UNLOCKED ── */}
             {shouldShowBarcode && (
               <View style={styles.barcodeCard}>
                 <Text style={styles.barcodeTitle}>Luggage Tag Barcode</Text>
@@ -344,27 +324,27 @@ const getBarcodeValue = () => {
                 </Text>
                 <View style={styles.qrWrapper}>
                   {getBarcodeValue() ? (
-  <QRCode
-    value={getBarcodeValue()}
-    size={200}
-    backgroundColor="#FFFFFF"
-    color="#0A0A0B"
-  />
-) : (
-  <ActivityIndicator size="small" color="#000" />
-)}
+                    <QRCode
+                      value={getBarcodeValue()}
+                      size={200}
+                      backgroundColor="#FFFFFF"
+                      color="#0A0A0B"
+                    />
+                  ) : (
+                    <ActivityIndicator size="small" color="#000" />
+                  )}
                 </View>
                 <Text style={styles.qrCaption}>Scan at Airport Counter</Text>
               </View>
             )}
 
-            {/* ── Barcode LOCKED — waiting for driver OTP step ── */}
+            {/* ── Barcode LOCKED ── */}
             {shouldShowLocked && (
               <View style={styles.lockedCard}>
                 <Text style={styles.lockIcon}>🔒</Text>
                 <Text style={styles.lockedTitle}>Barcode Locked</Text>
 
-                {latestBooking.vehicleId && latestBooking.vehicleId !== EMPTY ? (
+                {latestBooking?.vehicleId && latestBooking.vehicleId !== EMPTY ? (
                   <>
                     <Text style={styles.lockedInstruction}>
                       Tell the driver your Vehicle ID to unlock the barcode:
@@ -394,10 +374,8 @@ const getBarcodeValue = () => {
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -418,9 +396,7 @@ const styles = StyleSheet.create({
   backText:  { color: COLORS.text, fontWeight: '900', fontSize: 18 },
   title:     { color: COLORS.text, fontSize: 24, fontWeight: '900' },
   textRight: { textAlign: 'right', marginRight: 0, marginLeft: 16 },
-
   content: { padding: 24, paddingBottom: 40 },
-
   card: {
     backgroundColor: COLORS.card,
     borderRadius: 20,
@@ -436,8 +412,6 @@ const styles = StyleSheet.create({
   infoRow:   { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   infoLabel: { color: COLORS.muted, fontSize: 15, fontWeight: '600' },
   infoValue: { color: COLORS.text,  fontSize: 15, fontWeight: '800' },
-
-  // Barcode unlocked
   barcodeCard: {
     backgroundColor: COLORS.green,
     borderRadius: 24, padding: 24,
@@ -455,8 +429,6 @@ const styles = StyleSheet.create({
     color: '#08100A', fontSize: 13, fontWeight: '900',
     textTransform: 'uppercase', letterSpacing: 1,
   },
-
-  // Barcode locked
   lockedCard: {
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 24, padding: 28, marginTop: 10,
