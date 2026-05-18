@@ -1,40 +1,79 @@
 const pool = require('../config/db');
 
+// ── 1. VERIFY & FETCH BOOKING (Main API for Profile Sync) ───────────────────
 const verifyBooking = async (req, res) => {
   try {
     const { bookingId, airlineCode } = req.body;
 
-    if (!bookingId || !airlineCode) {
-      return res.status(400).json({ success: false, message: 'Booking ID and airline required' });
+    if (!bookingId) {
+      return res.status(400).json({ success: false, message: 'Booking ID is required' });
     }
 
-    const result = await pool.query(
-      `SELECT * FROM bookings
-       WHERE UPPER(booking_id) = UPPER($1)
-       AND UPPER(airline_code) = UPPER($2)`,
-      [bookingId, airlineCode]
-    );
+    // Dynamic Query: Airline code ho toh check kare, nahi toh sirf Booking ID se nikale
+    let queryText = `
+      SELECT 
+        b.booking_id,
+        b.passenger_name,
+        b.flight_number,
+        b.departure_time,
+        b.destination,
+        b.airline_code,
+        b.seat_number,
+        b.terminal,
+        b.passport_number,
+        b.date_of_birth,
+        b.nationality,
+        va.vehicle_id,
+        va.driver_name,
+        va.driver_phone,
+        va.status AS vehicle_status,
+        va.vehicle_verified,
+        va.barcode_data
+       FROM bookings b
+       LEFT JOIN vehicle_assignments va ON UPPER(b.booking_id) = UPPER(va.booking_id)
+       WHERE UPPER(b.booking_id) = UPPER($1)
+    `;
+    
+    const queryParams = [bookingId];
+    if (airlineCode) {
+      queryText += ` AND UPPER(b.airline_code) = UPPER($2)`;
+      queryParams.push(airlineCode);
+    }
+
+    const result = await pool.query(queryText, queryParams);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, valid: false, message: 'Booking not found. Check your ID.' });
+      return res.status(404).json({ success: false, valid: false, message: 'Booking not found.' });
     }
 
-    const booking = result.rows[0];
+    const row = result.rows[0];
 
+    // Uniform Response for Frontend State
     return res.status(200).json({
       success: true,
       valid: true,
       bookingData: {
-        bookingId: booking.booking_id,
-        passengerName: booking.passenger_name,
-        flightNumber: booking.flight_number,
-        departureTime: booking.departure_time,
-        destination: booking.destination,
-        airlineCode: booking.airline_code,
-        status: booking.status,
-        passportNumber: booking.passport_number,
-        dateOfBirth: booking.date_of_birth,
-        nationality: booking.nationality,
+        booking_id: row.booking_id,
+        passenger_name: row.passenger_name || 'Passenger',
+        flight_number: row.flight_number || 'N/A',
+        departure_time: row.departure_time || null,
+        destination: row.destination || '-',
+        airline_code: row.airline_code || '-',
+        seat_number: row.seat_number || 'N/A',
+        terminal: row.terminal || 'Terminal 3',
+        passport_number: row.passport_number || null,
+        date_of_birth: row.date_of_birth || null,
+        nationality: row.nationality || null,
+        
+        // 🚖 Slot / Vehicle Assignment Fields
+        vehicle_id: row.vehicle_id || null,
+        driver_name: row.driver_name || null,
+        driver_phone: row.driver_phone || null,
+        status: row.vehicle_status || 'Scheduled', 
+        
+        // 🔒 Barcode Lock/Unlock Flags
+        vehicle_verified: row.vehicle_verified === true || ['at_airport', 'barcode_issued'].includes(row.vehicle_status) || false,
+        barcode_data: row.barcode_data || row.booking_id // Fallback to Booking ID if data string is empty
       },
     });
   } catch (error) {
@@ -43,22 +82,54 @@ const verifyBooking = async (req, res) => {
   }
 };
 
+// ── 2. GET BOOKING DETAILS BY ID ───────────────────────────────────────────
+// ── 2. GET BOOKING DETAILS BY ID (Updated Response Structure) ───────────────────
 const getBookingDetails = async (req, res) => {
   try {
     const { bookingId } = req.params;
+    
     const result = await pool.query(
-      'SELECT * FROM bookings WHERE UPPER(booking_id) = UPPER($1)',
+      `SELECT b.*, va.vehicle_id, va.driver_name, va.driver_phone, va.status as vehicle_status, va.vehicle_verified, va.barcode_data 
+       FROM bookings b 
+       LEFT JOIN vehicle_assignments va ON UPPER(b.booking_id) = UPPER(va.booking_id)
+       WHERE UPPER(b.booking_id) = UPPER($1)`,
       [bookingId]
     );
+
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
-    return res.status(200).json({ success: true, booking: result.rows[0] });
+
+    const row = result.rows[0];
+
+    // 🔥 FIX: Response me 'bookingData' banakar terminal directly pass kar rahe hain
+    return res.status(200).json({ 
+      success: true, 
+      booking: row, 
+      bookingData: { 
+        booking_id: row.booking_id,
+        passenger_name: row.passenger_name || 'Passenger',
+        passenger_phone: row.passenger_phone || '-',
+        flight_number: row.flight_number || 'N/A',
+        departure_time: row.departure_time || null,
+        destination: row.destination || '-',
+        airline_code: row.airline_code || '-',
+        terminal: row.terminal || 'Terminal 1', // 🎯 Agar DB me null bhi hua, toh Terminal 1 fallback dega
+        vehicle_id: row.vehicle_id || null,
+        driver_name: row.driver_name || null,
+        driver_phone: row.driver_phone || null,
+        status: row.vehicle_status || 'dispatched',
+        vehicle_verified: row.vehicle_verified === true || String(row.vehicle_status).toLowerCase() === 'barcode_issued',
+        barcode_data: row.barcode_data || row.booking_id
+      }
+    });
+
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// ── 3. UPDATE PASSPORT DATA ────────────────────────────────────────────────
 const updatePassportData = async (req, res) => {
   try {
     const { bookingId } = req.params;
