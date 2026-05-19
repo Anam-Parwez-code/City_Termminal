@@ -1,4 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// ============================================================
+// FILE: mobile-app/src/screens/LiveTrackingScreen.js
+// FIXED — Real countdown timer (har second ghatta hai)
+// ============================================================
+
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   Animated,
   Dimensions,
@@ -18,23 +23,23 @@ import apiService, { getSocketBaseUrl } from '../services/apiService';
 const { height } = Dimensions.get('window');
 
 const COLORS = {
-  bg: '#0A0A0B',
-  map: '#15171B',
-  card: '#191C20',
-  line: '#2A2F36',
-  green: '#47D361',
+  bg:        '#0A0A0B',
+  map:       '#15171B',
+  card:      '#191C20',
+  line:      '#2A2F36',
+  green:     '#47D361',
   greenDark: '#163A1C',
-  text: '#FFFFFF',
-  muted: '#A7B0C0',
+  text:      '#FFFFFF',
+  muted:     '#A7B0C0',
 };
 
 const STAGES = [
-  { key: 'dispatched', label: 'Dispatched', eta: 18, progress: 0.08, x: 0.18, y: 0.72 },
-  { key: 'en_route', label: 'En Route', eta: 12, progress: 0.26, x: 0.34, y: 0.62 },
-  { key: 'arrived_pickup', label: 'At Pickup Zone', eta: 0, progress: 0.42, x: 0.48, y: 0.54 },
-  { key: 'barcode_issued', label: 'Barcode ready', eta: 0, progress: 0.54, x: 0.56, y: 0.5 },
-  { key: 'en_route_airport', label: 'En Route to Airport', eta: 10, progress: 0.78, x: 0.68, y: 0.4 },
-  { key: 'at_airport', label: 'Arrived — Airport', eta: 0, progress: 1, x: 0.82, y: 0.3 },
+  { key: 'dispatched',       label: 'Dispatched',           eta: 18,  progress: 0.08, x: 0.18, y: 0.72 },
+  { key: 'en_route',         label: 'En Route',             eta: 12,  progress: 0.26, x: 0.34, y: 0.62 },
+  { key: 'arrived_pickup',   label: 'At Pickup Zone',       eta: 0,   progress: 0.42, x: 0.48, y: 0.54 },
+  { key: 'barcode_issued',   label: 'Barcode ready',        eta: 0,   progress: 0.54, x: 0.56, y: 0.5  },
+  { key: 'en_route_airport', label: 'En Route to Airport',  eta: 10,  progress: 0.78, x: 0.68, y: 0.4  },
+  { key: 'at_airport',       label: 'Arrived — Airport',    eta: 0,   progress: 1,    x: 0.82, y: 0.3  },
 ];
 
 const normalizeStatus = (value) => {
@@ -44,7 +49,6 @@ const normalizeStatus = (value) => {
   if (!raw || raw === 'undefined') return 'dispatched';
   if (raw.includes('barcode')) return 'barcode_issued';
 
-  // Terminal arrival — strict (never treat "en_route_airport" as landed)
   if (
     raw === 'at_airport' ||
     raw.endsWith('_at_airport') ||
@@ -80,38 +84,53 @@ const normalizeStatus = (value) => {
 const stageForStatus = (status) =>
   STAGES.find((stage) => stage.key === normalizeStatus(status)) || STAGES[0];
 
+// ── ETA seconds se mm:ss format ──────────────────────────
+const formatETA = (totalSeconds) => {
+  if (totalSeconds <= 0) return '0:00';
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+};
+
+// ════════════════════════════════════════════════════════
 const LiveTrackingScreen = ({ navigation, route }) => {
   const { i18n } = useTranslation();
-  const isRTL = i18n.dir() === 'rtl';
-  const params = route?.params || {};
-  const bookingId = params.bookingId || params.bookingData?.bookingId || params.bookingData?.booking_id;
+  const isRTL       = i18n.dir() === 'rtl';
+  const params      = route?.params || {};
+  const bookingId   = params.bookingId || params.bookingData?.bookingId || params.bookingData?.booking_id;
   const confirmation = params.confirmation || {};
 
-  const [statusData, setStatusData] = useState(null);
+  const [statusData,   setStatusData]   = useState(null);
   const [driverCoords, setDriverCoords] = useState(null);
 
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const arrivedPing = useRef(false);
+  // ── Real countdown timer state ────────────────────────
+  // etaSeconds = total seconds bache hain (e.g. 18 min = 1080 seconds)
+  const [etaSeconds,   setEtaSeconds]   = useState(null);
+  const countdownRef   = useRef(null);
+  const arrivedPing    = useRef(false);
+  const pulseAnim      = useRef(new Animated.Value(1)).current;
 
   const vehicleId =
-    statusData?.vehicleId || statusData?.vehicle_id || confirmation.vehicleId || confirmation.vehicleNumber || '—';
+    statusData?.vehicleId || statusData?.vehicle_id ||
+    confirmation.vehicleId || confirmation.vehicleNumber || '—';
 
   const currentStage = useMemo(
     () => stageForStatus(statusData?.status),
     [statusData?.status],
   );
-  const eta =
-    typeof statusData?.etaMinutes === 'number' ? statusData.etaMinutes : currentStage.eta;
+
   const pickupLocation =
     statusData?.pickupLocation ||
     statusData?.pickup_location ||
     confirmation.locationName ||
+    params?.pickupLocation?.name ||
     'Pickup';
 
   const destinationTerminal =
     statusData?.destinationTerminal ||
     statusData?.destination_terminal ||
     confirmation.destinationTerminal ||
+    params?.destinationTerminal ||
     'DXB';
 
   const pickupCoords = useMemo(() => {
@@ -122,15 +141,12 @@ const LiveTrackingScreen = ({ navigation, route }) => {
     return null;
   }, [params.pickupLocation]);
 
-  const pickupForMap = pickupCoords ? { lat: pickupCoords.lat, lng: pickupCoords.lng } : null;
+  const pickupForMap   = pickupCoords || null;
 
   const rawDriver =
     driverCoords ||
     (statusData?.driverLat != null && statusData?.driverLng != null
-      ? {
-          lat: Number(statusData.driverLat),
-          lng: Number(statusData.driverLng),
-        }
+      ? { lat: Number(statusData.driverLat), lng: Number(statusData.driverLng) }
       : null);
 
   const validDriverCoords =
@@ -142,19 +158,71 @@ const LiveTrackingScreen = ({ navigation, route }) => {
       ? rawDriver
       : null;
 
-  const isAtPickup = currentStage.key === 'arrived_pickup';
+  const isAtPickup    = currentStage.key === 'arrived_pickup';
   const isBarcodeStage = normalizeStatus(statusData?.status) === 'barcode_issued';
-  const isAtAirport = currentStage.key === 'at_airport';
+  const isAtAirport   = currentStage.key === 'at_airport';
 
+  // ── ETA countdown start/reset karo ───────────────────
+  // Jab bhi stage change ho ya server se etaMinutes aaye, timer reset ho
+  const startCountdown = useCallback((minutes) => {
+    // Purana timer band karo
+    if (countdownRef.current) clearInterval(countdownRef.current);
+
+    const totalSecs = Math.max(0, Math.round(minutes * 60));
+    setEtaSeconds(totalSecs);
+
+    if (totalSecs === 0) return; // "0 min" stages ke liye timer nahi
+
+    countdownRef.current = setInterval(() => {
+      setEtaSeconds((prev) => {
+        if (prev == null || prev <= 1) {
+          clearInterval(countdownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000); // Har 1 second mein ghatta hai
+  }, []);
+
+  // Stage ya server ETA change hone par countdown reset karo
+  useEffect(() => {
+    const serverEta = statusData?.etaMinutes;
+
+    if (typeof serverEta === 'number' && serverEta > 0) {
+      // Server ne real ETA diya — use karo
+      startCountdown(serverEta);
+    } else if (currentStage.eta > 0) {
+      // Stage ka default ETA use karo
+      startCountdown(currentStage.eta);
+    } else {
+      // Arrived stages (0 min)
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      setEtaSeconds(0);
+    }
+
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [currentStage.key, statusData?.etaMinutes, startCountdown]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
+
+  // ── Pulse animation ────────────────────────────────────
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.28, duration: 800, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,    duration: 800, useNativeDriver: true }),
       ]),
     ).start();
   }, [pulseAnim]);
 
+  // ── Fetch + Socket ────────────────────────────────────
   useEffect(() => {
     let mounted = true;
 
@@ -162,35 +230,26 @@ const LiveTrackingScreen = ({ navigation, route }) => {
       if (!bookingId) return;
       try {
         const result = await apiService.getOTPStatus(bookingId);
-        const next = result.status || result.assignment || null;
+        const next   = result.status || result.assignment || null;
         if (mounted && next) {
           setStatusData(next);
           const lat =
-            next.driverLat != null
-              ? Number(next.driverLat)
-              : next.driver_lat != null
-                ? Number(next.driver_lat)
-                : null;
+            next.driverLat  != null ? Number(next.driverLat)  :
+            next.driver_lat != null ? Number(next.driver_lat)  : null;
           const lng =
-            next.driverLng != null
-              ? Number(next.driverLng)
-              : next.driver_lng != null
-                ? Number(next.driver_lng)
-                : null;
+            next.driverLng  != null ? Number(next.driverLng)  :
+            next.driver_lng != null ? Number(next.driver_lng)  : null;
           if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
             setDriverCoords({ lat, lng });
           }
         }
-      } catch (_err) {
-        //
-      }
+      } catch (_err) { /* silent */ }
     };
 
     fetchStatus();
     const pollTimer = setInterval(fetchStatus, 8000);
 
     const baseUrl = getSocketBaseUrl?.() || '';
-
     let socket;
 
     try {
@@ -210,6 +269,10 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           if (lat != null && lng != null) {
             setDriverCoords({ lat: Number(lat), lng: Number(lng) });
           }
+          // Server ne real-time ETA bheja — timer update karo
+          if (typeof payload.etaMinutes === 'number' && payload.etaMinutes > 0) {
+            startCountdown(payload.etaMinutes);
+          }
         });
 
         socket.on('status_update', (payload = {}) => {
@@ -218,64 +281,58 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           if (pb && pb !== my) return;
           setStatusData((prev) => ({
             ...(prev || {}),
-            status: payload.status || prev?.status,
-            barcodeData: payload.barcodeData || payload.barcode_data || prev?.barcodeData,
-            barcode_data: payload.barcode_data || payload.barcodeData || prev?.barcode_data,
-            currentLocation: payload.currentLocation || payload.current_location || prev?.currentLocation,
-            current_location: payload.current_location || payload.currentLocation || prev?.current_location,
-            vehicleId: payload.vehicleId || payload.vehicle_number || prev?.vehicleId,
-            vehicle_id: payload.vehicle_id || payload.vehicleId || payload.vehicle_number || prev?.vehicle_id,
-            driverName: payload.driverName || payload.driver_name || payload.driver || prev?.driverName,
-            driverPhone: payload.driverPhone || payload.driver_phone || prev?.driverPhone,
+            status:           payload.status           || prev?.status,
+            etaMinutes:       payload.etaMinutes       ?? prev?.etaMinutes,
+            barcodeData:      payload.barcodeData      || payload.barcode_data   || prev?.barcodeData,
+            barcode_data:     payload.barcode_data     || payload.barcodeData    || prev?.barcode_data,
+            currentLocation:  payload.currentLocation  || payload.current_location || prev?.currentLocation,
+            current_location: payload.current_location || payload.currentLocation  || prev?.current_location,
+            vehicleId:        payload.vehicleId        || payload.vehicle_number   || prev?.vehicleId,
+            vehicle_id:       payload.vehicle_id       || payload.vehicleId        || payload.vehicle_number || prev?.vehicle_id,
+            driverName:       payload.driverName       || payload.driver_name      || payload.driver || prev?.driverName,
+            driverPhone:      payload.driverPhone      || payload.driver_phone     || prev?.driverPhone,
           }));
           fetchStatus();
         });
       }
-    } catch (_e) {
-      //
-    }
+    } catch (_e) { /* silent */ }
 
     return () => {
       mounted = false;
       clearInterval(pollTimer);
       socket?.disconnect?.();
     };
-  }, [bookingId]);
+  }, [bookingId, startCountdown]);
 
+  // ── Airport arrival alert ─────────────────────────────
   useEffect(() => {
     if (!isAtAirport || arrivedPing.current) return;
-
     arrivedPing.current = true;
     Alert.alert(
       Platform.OS === 'web' ? 'Arrived — Airport' : 'Arrived at airport',
       'Driver has reached the terminal. Your baggage team will offload shortly.',
-      [
-        {
-          text: 'OK',
-          onPress: () =>
-            navigation.replace('Arrived', {
-              ...params,
-              statusData,
-              confirmation: {
-                ...confirmation,
-                vehicleId,
-                vehicleNumber: vehicleId,
-              },
-            }),
-        },
-      ],
+      [{
+        text: 'OK',
+        onPress: () =>
+          navigation.replace('Arrived', {
+            ...params,
+            statusData,
+            confirmation: { ...confirmation, vehicleId, vehicleNumber: vehicleId },
+          }),
+      }],
       { cancelable: true },
     );
-  }, [
-    confirmation,
-    isAtAirport,
-    navigation,
-    params,
-    statusData,
-    vehicleId,
-  ]);
+  }, [confirmation, isAtAirport, navigation, params, statusData, vehicleId]);
 
+  // ── ETA display ───────────────────────────────────────
+  // etaSeconds null = still loading initial stage
+  const etaDisplay = etaSeconds == null
+    ? `${currentStage.eta}`          // minutes (initial render)
+    : etaSeconds <= 0
+      ? 'Here'                        // arrived
+      : formatETA(etaSeconds);        // mm:ss countdown
 
+  const showMMSS = etaSeconds != null && etaSeconds > 0;
 
   return (
     <View style={styles.container}>
@@ -286,7 +343,6 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           style={[styles.liveMap, { height: height * 0.44 }]}
         />
 
-        {/* schematic overlay fallback when coords missing */}
         {!pickupForMap && (
           <View style={styles.fallbackDots} pointerEvents="none">
             <View style={styles.gridMini} />
@@ -295,7 +351,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
                 styles.vehicleDotMini,
                 {
                   left: `${currentStage.x * 100}%`,
-                  top: `${currentStage.y * 100}%`,
+                  top:  `${currentStage.y * 100}%`,
                   transform: [{ scale: pulseAnim }],
                 },
               ]}
@@ -318,16 +374,27 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
       <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
         <View style={[styles.statusHeader, isRTL && styles.rtlRow]}>
+
+          {/* ── ETA Box — real countdown ── */}
           <View style={styles.etaBox}>
-            <Text style={styles.etaNumber}>{eta}</Text>
-            <Text style={styles.etaLabel}>min</Text>
+            <Text style={styles.etaNumber}>{etaDisplay}</Text>
+            <Text style={styles.etaLabel}>
+              {etaSeconds === 0
+                ? '🟢'
+                : showMMSS
+                  ? 'mm:ss'
+                  : 'min'}
+            </Text>
           </View>
+
           <View style={styles.statusCopy}>
-            <Text style={[styles.statusTitle, isRTL && styles.textRight]}>{currentStage.label}</Text>
+            <Text style={[styles.statusTitle, isRTL && styles.textRight]}>
+              {currentStage.label}
+            </Text>
             <Text style={[styles.statusSub, isRTL && styles.textRight]}>
               {statusData?.currentLocation ||
                 statusData?.current_location ||
-                `Van ${pickupLocation} ⇄ ${destinationTerminal}`}
+                `${pickupLocation} ⇄ ${destinationTerminal}`}
             </Text>
           </View>
         </View>
@@ -336,16 +403,14 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <TouchableOpacity
             style={styles.barcodeBanner}
             onPress={() =>
-              
               navigation.navigate('UserProfile', {
-                 bookingId: bookingId,
-                  
+                bookingId,
                 ...params,
                 statusData,
                 confirmation: {
                   ...confirmation,
                   barcodeData: statusData?.barcodeData || confirmation.barcodeData,
-                  driverName: statusData?.driverName || confirmation.driverName,
+                  driverName:  statusData?.driverName  || confirmation.driverName,
                   driverPhone: statusData?.driverPhone || confirmation.driverPhone,
                 },
               })
@@ -359,12 +424,14 @@ const LiveTrackingScreen = ({ navigation, route }) => {
         <View style={styles.stageRail}>
           {STAGES.map((stage) => {
             const idxCurrent = STAGES.findIndex((item) => item.key === currentStage.key);
-            const idxStage = STAGES.findIndex((item) => item.key === stage.key);
-            const complete = idxStage <= idxCurrent;
+            const idxStage   = STAGES.findIndex((item) => item.key === stage.key);
+            const complete   = idxStage <= idxCurrent;
             return (
               <View key={stage.key} style={styles.stageItem}>
                 <View style={[styles.stageDot, complete && styles.stageDotDone]} />
-                <Text style={[styles.stageLabel, complete && styles.stageLabelDone]}>{stage.label}</Text>
+                <Text style={[styles.stageLabel, complete && styles.stageLabelDone]}>
+                  {stage.label}
+                </Text>
               </View>
             );
           })}
@@ -398,9 +465,11 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
         {isAtPickup && (
           <View style={styles.verificationContainer}>
-            <Text style={styles.verificationLabel}>Driver reached you! Tell them your Vehicle ID (OTP) to unlock your barcode:</Text>
-            <View style={{ backgroundColor: '#0A0A0B', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#2A2F36' }}>
-              <Text style={{ fontSize: 32, fontWeight: '900', color: '#47D361', letterSpacing: 2 }}>{vehicleId}</Text>
+            <Text style={styles.verificationLabel}>
+              Driver reached you! Tell them your Vehicle ID (OTP) to unlock your barcode:
+            </Text>
+            <View style={styles.otpBox}>
+              <Text style={styles.otpText}>{vehicleId}</Text>
             </View>
           </View>
         )}
@@ -415,26 +484,27 @@ const LiveTrackingScreen = ({ navigation, route }) => {
   );
 };
 
+// ════════════════════════════════════════════════════════
+// STYLES
+// ════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
+  container:    { flex: 1, backgroundColor: COLORS.bg },
   mapContainer: { height: height * 0.46, position: 'relative', backgroundColor: COLORS.map },
-  liveMap: { width: '100%' },
+  liveMap:      { width: '100%' },
   fallbackDots: { ...StyleSheet.absoluteFillObject, justifyContent: 'center' },
-  gridMini: { flex: 1, opacity: 0.06, backgroundColor: '#fff' },
-  vehicleDotMini: { position: 'absolute', marginLeft: -14, marginTop: -14, width: 28, height: 28 },
+  gridMini:     { flex: 1, opacity: 0.06, backgroundColor: '#fff' },
+  vehicleDotMini: {
+    position: 'absolute', marginLeft: -14, marginTop: -14, width: 28, height: 28,
+  },
   vehicleInnerMini: {
-    flex: 1,
-    borderRadius: 999,
+    flex: 1, borderRadius: 999,
     backgroundColor: COLORS.green,
-    borderWidth: 2,
-    borderColor: COLORS.text,
-    opacity: 0.72,
+    borderWidth: 2, borderColor: COLORS.text, opacity: 0.72,
   },
   mapHeader: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 52 : 40,
-    left: 18,
-    right: 18,
+    left: 18, right: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -442,158 +512,111 @@ const styles = StyleSheet.create({
   },
   backMini: {
     backgroundColor: '#0a0a0bcc',
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
   },
   backMiniText: { color: COLORS.text, fontWeight: '900', fontSize: 18 },
   livePillWrap: {
     flexShrink: 0,
     backgroundColor: COLORS.green,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7,
   },
-
   livePillText: { color: '#08100a', fontWeight: '900', fontSize: 12, letterSpacing: 0.5 },
   vehiclePill: {
-    color: COLORS.text,
-    backgroundColor: '#0a0a0bcc',
-    borderRadius: 999,
-    paddingHorizontal: 13,
-    paddingVertical: 7,
-    fontSize: 14,
-    fontWeight: '900',
-    overflow: 'hidden',
-  },
-  barcodeBanner: {
-    backgroundColor: COLORS.greenDark,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.green,
-    padding: 16,
-    marginBottom: 14,
-    gap: 4,
-  },
-  barcodeBannerTitle: { color: COLORS.green, fontWeight: '900', fontSize: 16 },
-  barcodeBannerSub: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
-  panel: {
-    flex: 1,
-    backgroundColor: COLORS.card,
-    marginTop: -28,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-  },
-  panelContent: { padding: 24, paddingBottom: 40 },
-  statusHeader: { flexDirection: 'row', gap: 16, alignItems: 'center', marginBottom: 18 },
-  rtlRow: { flexDirection: 'row-reverse' },
-  etaBox: {
-    width: 76,
-    height: 76,
-    borderRadius: 22,
-    backgroundColor: COLORS.green,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  etaNumber: { color: '#08100A', fontSize: 30, fontWeight: '900' },
-  etaLabel: { color: '#0b240f', fontSize: 12, fontWeight: '900' },
-  statusCopy: { flex: 1 },
-  statusTitle: { color: COLORS.text, fontSize: 22, fontWeight: '900' },
-  statusSub: { color: COLORS.muted, fontSize: 13, lineHeight: 19, marginTop: 4 },
-  stageRail: { gap: 10, marginBottom: 16 },
-  stageItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  stageDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#3a404a' },
-  stageDotDone: { backgroundColor: COLORS.green },
-  stageLabel: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
-  stageLabelDone: { color: COLORS.text },
-  progressBar: {
-    height: 7,
-    borderRadius: 999,
-    backgroundColor: '#2e343d',
-    overflow: 'hidden',
-    marginBottom: 18,
-  },
-  progressFill: { height: '100%', backgroundColor: COLORS.green },
-  detailsCard: {
-    backgroundColor: '#101215',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-  },
-  driverCard: {
-    marginTop: 12,
-    backgroundColor: '#101215',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-  },
-  driverPhone: { marginTop: 6, fontSize: 18, fontWeight: '900', color: COLORS.green },
-  vehicleId: {
-    color: COLORS.green,
-    fontSize: 34,
-    fontWeight: '900',
-    marginBottom: 8,
-  },
-  detailLabel: { color: COLORS.muted, fontSize: 12, fontWeight: '900', textTransform: 'uppercase', marginTop: 10 },
-  detailValue: { color: COLORS.text, fontSize: 15, fontWeight: '800', marginTop: 4 },
-  airportBanner: {
-    backgroundColor: COLORS.greenDark,
-    borderWidth: 1,
-    borderColor: COLORS.green,
-    borderRadius: 18,
-    padding: 18,
-    alignItems: 'center',
-    marginTop: 18,
-  },
-  airportBannerText: { color: COLORS.green, fontWeight: '900', fontSize: 18 },
-  textRight: { textAlign: 'right' },
-  verificationContainer: {
-    backgroundColor: '#101215',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    marginTop: 18,
-  },
-  flowHint: {
-    marginTop: 12,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: '#101215',
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    color: COLORS.muted,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: '700',
+    color: COLORS.text, backgroundColor: '#0a0a0bcc',
+    borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7,
+    fontSize: 14, fontWeight: '900', overflow: 'hidden',
   },
 
-  verificationLabel: { color: COLORS.text, fontSize: 14, fontWeight: '800', marginBottom: 12 },
-  verificationInputRow: { flexDirection: 'row', gap: 10 },
-  verificationInput: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    borderRadius: 14,
-    color: COLORS.text,
-    paddingHorizontal: 16,
-    height: 50,
-    fontSize: 16,
+  barcodeBanner: {
+    backgroundColor: COLORS.greenDark, borderRadius: 20,
+    borderWidth: 1, borderColor: COLORS.green,
+    padding: 16, marginBottom: 14, gap: 4,
   },
-  verifyButton: {
+  barcodeBannerTitle: { color: COLORS.green, fontWeight: '900', fontSize: 16 },
+  barcodeBannerSub:   { color: COLORS.muted,  fontWeight: '700', fontSize: 13 },
+
+  panel: {
+    flex: 1, backgroundColor: COLORS.card,
+    marginTop: -28, borderTopLeftRadius: 30, borderTopRightRadius: 30,
+  },
+  panelContent: { padding: 24, paddingBottom: 40 },
+
+  statusHeader: {
+    flexDirection: 'row', gap: 16,
+    alignItems: 'center', marginBottom: 18,
+  },
+  rtlRow: { flexDirection: 'row-reverse' },
+
+  etaBox: {
+    width: 76, height: 76, borderRadius: 22,
     backgroundColor: COLORS.green,
-    borderRadius: 14,
-    paddingHorizontal: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
-  verifyButtonText: { color: '#08100A', fontWeight: '900', fontSize: 15 },
-  disabledButton: { opacity: 0.45 },
+  etaNumber: { color: '#08100A', fontSize: 26, fontWeight: '900', letterSpacing: -0.5 },
+  etaLabel:  { color: '#0b240f', fontSize: 11, fontWeight: '900' },
+
+  statusCopy:  { flex: 1 },
+  statusTitle: { color: COLORS.text, fontSize: 22, fontWeight: '900' },
+  statusSub:   { color: COLORS.muted, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  textRight:   { textAlign: 'right' },
+
+  stageRail: { gap: 10, marginBottom: 16 },
+  stageItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stageDot:  { width: 12, height: 12, borderRadius: 6, backgroundColor: '#3a404a' },
+  stageDotDone: { backgroundColor: COLORS.green },
+  stageLabel:    { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
+  stageLabelDone: { color: COLORS.text },
+
+  progressBar: {
+    height: 7, borderRadius: 999,
+    backgroundColor: '#2e343d', overflow: 'hidden', marginBottom: 18,
+  },
+  progressFill: { height: '100%', backgroundColor: COLORS.green },
+
+  detailsCard: {
+    backgroundColor: '#101215', borderRadius: 22,
+    padding: 18, borderWidth: 1, borderColor: COLORS.line,
+  },
+  driverCard: {
+    marginTop: 12, backgroundColor: '#101215',
+    borderRadius: 22, padding: 18,
+    borderWidth: 1, borderColor: COLORS.line,
+  },
+  driverPhone: { marginTop: 6, fontSize: 18, fontWeight: '900', color: COLORS.green },
+  vehicleId:   { color: COLORS.green, fontSize: 34, fontWeight: '900', marginBottom: 8 },
+  detailLabel: {
+    color: COLORS.muted, fontSize: 12, fontWeight: '900',
+    textTransform: 'uppercase', marginTop: 10,
+  },
+  detailValue: { color: COLORS.text, fontSize: 15, fontWeight: '800', marginTop: 4 },
+
+  airportBanner: {
+    backgroundColor: COLORS.greenDark,
+    borderWidth: 1, borderColor: COLORS.green,
+    borderRadius: 18, padding: 18,
+    alignItems: 'center', marginTop: 18,
+  },
+  airportBannerText: { color: COLORS.green, fontWeight: '900', fontSize: 18 },
+
+  verificationContainer: {
+    backgroundColor: '#101215', borderRadius: 22,
+    padding: 18, borderWidth: 1, borderColor: COLORS.line, marginTop: 18,
+  },
+  verificationLabel: { color: COLORS.text, fontSize: 14, fontWeight: '800', marginBottom: 12 },
+  otpBox: {
+    backgroundColor: '#0A0A0B', padding: 16, borderRadius: 12,
+    alignItems: 'center', marginTop: 8,
+    borderWidth: 1, borderColor: '#2A2F36',
+  },
+  otpText: { fontSize: 32, fontWeight: '900', color: COLORS.green, letterSpacing: 2 },
+
+  flowHint: {
+    marginTop: 12, padding: 14, borderRadius: 14,
+    backgroundColor: '#101215',
+    borderWidth: 1, borderColor: COLORS.line,
+    color: COLORS.muted, fontSize: 13, lineHeight: 19, fontWeight: '700',
+  },
 });
 
 export default LiveTrackingScreen;
