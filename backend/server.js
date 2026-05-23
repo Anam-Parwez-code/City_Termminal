@@ -34,6 +34,9 @@ app.use('/api/slots', slotRoutes);
 const otpRoutes = require('./src/routes/otpRoutes');
 app.use('/api/otp', otpRoutes);
 
+const aiRoutes = require('./src/routes/aiRoutes');
+app.use('/api/ai', aiRoutes);
+
 // NEW: Confirmation route
 const confirmationRoutes = require('./src/routes/confirmationRoutes');
 app.use('/api/confirmation', confirmationRoutes);

@@ -72,7 +72,9 @@ const LanguageSelectScreen = ({ navigation }) => {
     // isRTL = true → Arabic (right-to-left)
     // isRTL = false → English (left-to-right)
     const shouldReload = I18nManager.isRTL !== language.isRTL;
-    I18nManager.swapLeftAndRightInRTL(language.isRTL);
+    if (typeof I18nManager.swapLeftAndRightInRTL === 'function') {
+      I18nManager.swapLeftAndRightInRTL(language.isRTL);
+    }
     I18nManager.allowRTL(language.isRTL);
     I18nManager.forceRTL(language.isRTL);
 

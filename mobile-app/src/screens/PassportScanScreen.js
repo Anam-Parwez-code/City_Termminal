@@ -40,6 +40,7 @@ const PassportScanScreen = ({ navigation, route }) => {
 
   const [capturedImage, setCapturedImage] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState('');
 
   // ─── scanStep controls which UI shows ─────────────────────
   // 'guide'      → Camera view dikhao
@@ -51,6 +52,7 @@ const PassportScanScreen = ({ navigation, route }) => {
   const handleTakePhoto = async () => {
     if (!cameraRef.current) return;
     try {
+      setScanError('');
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
         base64: true,   // Base64 chahiye backend ke liye
@@ -65,6 +67,7 @@ const PassportScanScreen = ({ navigation, route }) => {
 
   // ─── GALLERY SE PHOTO LO ─────────────────────────────────
   const handlePickImage = async (type) => {
+    setScanError('');
     const options = {
       mediaType: 'photo',
       includeBase64: true,
@@ -85,6 +88,7 @@ const PassportScanScreen = ({ navigation, route }) => {
 
     // Base64 available hai?
     if (!asset.base64) {
+      setScanError('Could not read this image. Please choose another passport photo.');
       Alert.alert(t('common.error'), t('slotBooking.tryLater'));
       return;
     }
@@ -102,16 +106,19 @@ const PassportScanScreen = ({ navigation, route }) => {
     setCapturedImage(null);   // Photo clear karo
     setScanStep('guide');     // Guide step pe wapas
     setIsScanning(false);     // Loading band karo
+    setScanError('');
   };
 
   // ─── PASSPORT PROCESS ────────────────────────────────────
   // ── YAHI MAIN BUG THA ─────────────────────────────────────
   const handleProcessPassport = async () => {
     if (!capturedImage || !capturedImage.base64) {
+      setScanError('Please capture or upload a passport image first.');
       Alert.alert(t('common.error'), t('slotBooking.tryLater'));
       return;
     }
 
+    setScanError('');
     setScanStep('processing'); // Processing overlay dikhao
     setIsScanning(true);
 
@@ -148,21 +155,21 @@ const PassportScanScreen = ({ navigation, route }) => {
     } catch (err) {
       // ── ERROR HANDLING ────────────────────────────────────
       console.error('Passport scan error:', err.message);
+      const message = err.message || 'Passport details were not found clearly. Please upload a clearer photo.';
+      setScanError(message);
 
       Alert.alert(
-        t('common.error'),
-        err.message || t('slotBooking.tryLater'),
+        'Passport not verified',
+        message,
         [
           {
-            text: t('slotBooking.refresh'),
-            onPress: handleRetake, // Retry pe guide pe wapas
+            text: 'Try again',
           },
         ]
       );
 
-      // Error pe guide pe wapas jaao — loop nahi hoga
-      setScanStep('guide');
-      setCapturedImage(null);
+      // Error pe preview par rakho, taaki user reason dekh kar retake/upload kar sake.
+      setScanStep('captured');
 
     } finally {
       setIsScanning(false);
@@ -250,12 +257,18 @@ const PassportScanScreen = ({ navigation, route }) => {
             <Text style={styles.confirmSubtitle}>
               {t('verification.subtitle')}
             </Text>
+            {scanError ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorTitle}>Passport not found clearly</Text>
+                <Text style={styles.errorMessage}>{scanError}</Text>
+              </View>
+            ) : null}
           </View>
 
           {/* Action buttons */}
           <View style={styles.actionButtons}>
             <TouchableOpacity style={styles.retakeButton} onPress={handleRetake}>
-              <Text style={styles.retakeText}>{t('slotBooking.refresh')}</Text>
+              <Text style={styles.retakeText}>{scanError ? 'Upload again' : t('slotBooking.refresh')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.confirmButton, isScanning && styles.confirmDisabled]}
@@ -314,6 +327,13 @@ const PassportScanScreen = ({ navigation, route }) => {
               >
                 <Text style={styles.gallerySecondaryText}>📁 {t('bookingEntry.demoButton')}</Text>
               </TouchableOpacity>
+
+              {scanError ? (
+                <View style={styles.cameraErrorBanner}>
+                  <Text style={styles.errorTitle}>Passport not verified</Text>
+                  <Text style={styles.errorMessage}>{scanError}</Text>
+                </View>
+              ) : null}
 
               {/* Capture Button */}
               <TouchableOpacity style={styles.captureButton} onPress={handleTakePhoto}>
@@ -429,6 +449,27 @@ const styles = StyleSheet.create({
   confirmInstructions: { backgroundColor: 'rgba(0,0,0,0.8)', padding: 20, alignItems: 'center' },
   confirmTitle: { fontSize: 16, fontWeight: '600', color: '#FFFFFF', marginBottom: 6 },
   confirmSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.6)' },
+  errorBanner: {
+    width: '100%',
+    backgroundColor: 'rgba(239,51,64,0.16)',
+    borderColor: 'rgba(239,51,64,0.45)',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 14,
+    alignItems: 'flex-start',
+  },
+  cameraErrorBanner: {
+    width: '100%',
+    backgroundColor: 'rgba(239,51,64,0.18)',
+    borderColor: 'rgba(239,51,64,0.5)',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+  },
+  errorTitle: { color: '#FFD0D4', fontSize: 13, fontWeight: '900', marginBottom: 4 },
+  errorMessage: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', lineHeight: 18 },
 
   actionButtons: { flexDirection: 'row', gap: 12, padding: 20, backgroundColor: theme.colors.black },
   retakeButton: {

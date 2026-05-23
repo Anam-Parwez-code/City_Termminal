@@ -36,6 +36,14 @@ const TERMINALS = [
   'Al Maktoum International Airport (DWC)',
 ];
 
+const QUICK_PICKUP_LOCATIONS = [
+  { id: 'mall_of_emirates', name: 'Mall of the Emirates', lat: 25.1181, lng: 55.2006 },
+  { id: 'downtown_dubai', name: 'Downtown Dubai', lat: 25.1972, lng: 55.2744 },
+  { id: 'dubai_marina', name: 'Dubai Marina / JBR', lat: 25.0800, lng: 55.1400 },
+  { id: 'city_walk', name: 'City Walk', lat: 25.2075, lng: 55.2622 },
+  { id: 'deira_city_centre', name: 'Deira City Centre', lat: 25.2534, lng: 55.3326 },
+];
+
 const LocationPickScreen = ({ navigation, route }) => {
   const { i18n } = useTranslation();
   const isRTL = i18n.dir() === 'rtl';
@@ -57,6 +65,19 @@ const LocationPickScreen = ({ navigation, route }) => {
   const [placeHits, setPlaceHits] = useState([]);
   const [placesLoading, setPlacesLoading] = useState(false);
   const [pickupLabel, setPickupLabel] = useState('');
+  const [aiRecommendations, setAiRecommendations] = useState([]);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const flightTime =
+    params.bookingData?.departureTime ||
+    params.bookingData?.departure_time ||
+    params.departureTime ||
+    null;
+  const flightNumber =
+    params.bookingData?.flightNumber ||
+    params.bookingData?.flight_number ||
+    params.flightNumber ||
+    '';
 
   useEffect(() => {
     const q = placeQuery.trim();
@@ -77,6 +98,31 @@ const LocationPickScreen = ({ navigation, route }) => {
     }, 450);
     return () => clearTimeout(tid);
   }, [placeQuery]);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAIRecommendations = async () => {
+      setAiLoading(true);
+      try {
+        const result = await apiService.recommendPickup({
+          flightTime,
+          destinationTerminal: terminal,
+          flightNumber,
+          language: i18n.language || 'en',
+        });
+        if (!mounted) return;
+        setAiRecommendations(result?.recommended || result?.recommendations || []);
+      } catch (_err) {
+        if (mounted) setAiRecommendations([]);
+      } finally {
+        if (mounted) setAiLoading(false);
+      }
+    };
+    fetchAIRecommendations();
+    return () => {
+      mounted = false;
+    };
+  }, [flightNumber, flightTime, i18n.language, terminal]);
 
   const handleRegionChangeComplete = (newRegion) => {
     setRegion(newRegion);
@@ -100,6 +146,31 @@ const LocationPickScreen = ({ navigation, route }) => {
     };
     mapRef.current?.animateToRegion?.(nextRegion, 520);
     setRegion(nextRegion);
+  };
+
+  const selectQuickLocation = (location) => {
+    setPickupLabel(location.name);
+    setPlaceQuery('');
+    setPlaceHits([]);
+    Keyboard.dismiss();
+    const nextRegion = {
+      latitude: location.lat,
+      longitude: location.lng,
+      latitudeDelta: 0.03,
+      longitudeDelta: 0.025,
+    };
+    mapRef.current?.animateToRegion?.(nextRegion, 520);
+    setRegion(nextRegion);
+  };
+
+  const recommendationFor = (locationId) =>
+    aiRecommendations.find((item) => item.locationId === locationId || item.location_id === locationId);
+
+  const reasonFor = (recommendation) => {
+    if (!recommendation) return null;
+    return i18n.language === 'ar'
+      ? recommendation.reason_ar || recommendation.reason_en
+      : recommendation.reason_en || recommendation.reason_ar;
   };
 
   const handleContinue = async () => {
@@ -174,6 +245,33 @@ const LocationPickScreen = ({ navigation, route }) => {
             ))}
           </ScrollView>
         ) : null}
+
+        <View style={styles.quickHeaderRow}>
+          <Text style={styles.quickTitle}>Suggested pickup points</Text>
+          {aiLoading ? <ActivityIndicator size="small" color={COLORS.green} /> : null}
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickList}>
+          {QUICK_PICKUP_LOCATIONS.map((location) => {
+            const recommendation = recommendationFor(location.id);
+            const reason = reasonFor(recommendation);
+            return (
+              <TouchableOpacity
+                key={location.id}
+                style={[styles.quickCard, recommendation && styles.quickCardRecommended]}
+                onPress={() => selectQuickLocation(location)}
+                activeOpacity={0.82}
+              >
+                {recommendation ? (
+                  <Text style={styles.aiBadge}>
+                    {i18n.language === 'ar' ? '⭐ موصى به - Powered by JAIS LLM' : '⭐ AI Recommended'}
+                  </Text>
+                ) : null}
+                <Text style={styles.quickName} numberOfLines={1}>{location.name}</Text>
+                {reason ? <Text style={styles.quickReason} numberOfLines={2}>AI: {reason}</Text> : null}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
 
         <View style={styles.locationRow}>
           <View style={styles.dotIcon} />
@@ -268,6 +366,23 @@ const styles = StyleSheet.create({
   hitList: { maxHeight: 130, marginBottom: 12 },
   hitItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   hitText: { color: COLORS.text, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  quickHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  quickTitle: { color: COLORS.muted, fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.6 },
+  quickList: { marginBottom: 14 },
+  quickCard: {
+    width: 190,
+    minHeight: 86,
+    backgroundColor: '#101215',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    padding: 12,
+    marginRight: 10,
+  },
+  quickCardRecommended: { borderColor: COLORS.green, backgroundColor: COLORS.greenDark },
+  aiBadge: { color: COLORS.green, fontSize: 10, fontWeight: '900', marginBottom: 6 },
+  quickName: { color: COLORS.text, fontSize: 13, fontWeight: '900', marginBottom: 4 },
+  quickReason: { color: '#D7F6DF', fontSize: 11, fontWeight: '700', lineHeight: 15 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   dotIcon: { width: 12, height: 12, borderRadius: 6, backgroundColor: COLORS.green },
   rowLabel: { color: COLORS.muted, fontSize: 12, fontWeight: '700', marginBottom: 4 },

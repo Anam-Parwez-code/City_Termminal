@@ -1,6 +1,7 @@
 require('dotenv').config();
 const Tesseract = require('tesseract.js');
 const OpenAI = require('openai');
+const pool = require('../config/db');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'dummy-key',
@@ -26,7 +27,7 @@ const normalizeBase64 = (imageBase64) => {
 
 const scanPassport = async (req, res) => {
   try {
-    const { imageBase64 } = req.body;
+    const { imageBase64, bookingId } = req.body;
 
     if (!imageBase64) {
       return res.status(400).json({
@@ -50,9 +51,53 @@ const scanPassport = async (req, res) => {
       extractedData = await scanWithTesseract(imageBase64);
     }
 
+    const normalized = normalizePassportPayload(extractedData);
+
+    if (!hasRequiredPassportData(normalized)) {
+      return res.status(422).json({
+        success: false,
+        message: 'Passport details not found clearly. Please retake the photo with name, passport number and DOB visible.',
+        data: normalized,
+      });
+    }
+
+    if (bookingId) {
+      const booking = await pool.query(
+        `SELECT passenger_name, passport_number, date_of_birth
+         FROM bookings
+         WHERE UPPER(booking_id) = UPPER($1)
+         LIMIT 1`,
+        [bookingId]
+      );
+
+      if (booking.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Booking not found for passport verification.',
+        });
+      }
+
+      const row = booking.rows[0];
+      if (!namesMatch(normalized.name, row.passenger_name)) {
+        return res.status(401).json({
+          success: false,
+          message: 'Passport name does not match this booking. Please upload the passenger passport.',
+          data: normalized,
+        });
+      }
+
+      if (row.passport_number && normalized.passportNumber && normalizeToken(row.passport_number) !== normalizeToken(normalized.passportNumber)) {
+        return res.status(401).json({
+          success: false,
+          message: 'Passport number does not match this booking.',
+          data: normalized,
+        });
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      data: normalizePassportPayload(extractedData),
+      data: normalized,
       method,
     });
   } catch (error) {
@@ -63,6 +108,28 @@ const scanPassport = async (req, res) => {
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
+};
+
+const normalizeToken = (value) =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+const normalizeName = (value) =>
+  String(value || '')
+    .toUpperCase()
+    .replace(/[^A-Z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const namesMatch = (passportName, bookingName) => {
+  const pass = normalizeName(passportName);
+  const book = normalizeName(bookingName);
+  if (!pass || !book) return false;
+  if (pass === book) return true;
+  const passParts = pass.split(' ').filter((part) => part.length > 1);
+  const bookParts = book.split(' ').filter((part) => part.length > 1);
+  if (passParts.length === 0 || bookParts.length === 0) return false;
+  const matches = bookParts.filter((part) => passParts.includes(part)).length;
+  return matches >= Math.min(2, bookParts.length);
 };
 
 const scanWithTesseract = async (imageBase64) => {

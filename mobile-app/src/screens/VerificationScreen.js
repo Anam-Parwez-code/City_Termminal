@@ -8,11 +8,60 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, TextInput, Image, ActivityIndicator,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
 import theme from '../theme';
+
+const COLORS = {
+  bg: '#0A0A0B',
+  card: '#15171B',
+  panel: '#101215',
+  line: '#2A2F36',
+  green: '#47D361',
+  amber: '#F5A623',
+  red: '#EF3340',
+  text: '#FFFFFF',
+  muted: '#A7B0C0',
+};
+
+const normalizeName = (value) =>
+  String(value || '').toUpperCase().replace(/[^A-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+const namesMatch = (passportName, bookingName) => {
+  const pass = normalizeName(passportName);
+  const book = normalizeName(bookingName);
+  if (!pass || !book) return false;
+  if (pass === book) return true;
+  const passParts = pass.split(' ').filter((part) => part.length > 1);
+  const bookParts = book.split(' ').filter((part) => part.length > 1);
+  const matches = bookParts.filter((part) => passParts.includes(part)).length;
+  return matches >= Math.min(2, bookParts.length);
+};
+
+const ConfidenceMeter = ({ score = 0, isRTL }) => {
+  const pct = Math.max(0, Math.min(1, Number(score) || 0));
+  const level = pct > 0.85 ? 'high' : pct >= 0.6 ? 'medium' : 'low';
+  const color = level === 'high' ? COLORS.green : level === 'medium' ? COLORS.amber : COLORS.red;
+  const message = {
+    high: isRTL ? 'ثقة عالية - تم التحقق من البيانات' : 'High confidence - data verified',
+    medium: isRTL ? 'ثقة متوسطة - يرجى المراجعة' : 'Medium confidence - please review',
+    low: isRTL ? 'ثقة منخفضة - يفضل إعادة التصوير' : 'Low confidence - retake recommended',
+  }[level];
+
+  return (
+    <View style={styles.confidenceCard}>
+      <View style={styles.confidenceTop}>
+        <Text style={[styles.confidenceLabel, isRTL && styles.textRight]}>{message}</Text>
+        <Text style={[styles.confidenceScore, { color }]}>{Math.round(pct * 100)}%</Text>
+      </View>
+      <View style={styles.confidenceTrack}>
+        <View style={[styles.confidenceFill, { width: `${pct * 100}%`, backgroundColor: color }]} />
+      </View>
+    </View>
+  );
+};
 
 const VerificationScreen = ({ navigation, route }) => {
   const { t, i18n } = useTranslation();
@@ -61,11 +110,28 @@ const VerificationScreen = ({ navigation, route }) => {
     () => ({ ...(bookingData || {}), ...(resolvedBookingData || {}) }),
     [bookingData, resolvedBookingData]
   );
+  const bookingPassengerName =
+    mergedBookingData?.passengerName ||
+    mergedBookingData?.passenger_name ||
+    mergedBookingData?.name ||
+    '';
+  const hasVisibleRequiredData = Boolean(name?.trim() && passportNo?.trim() && dob?.trim() && nationality?.trim());
+  const nameMatchesBooking = bookingPassengerName ? namesMatch(name, bookingPassengerName) : true;
+  const canVerifyPassport = hasVisibleRequiredData && nameMatchesBooking;
 
   // ── CONFIRM — SEEDHA SLOT BOOKING PE JAO ─────────────────
   // Passport update backend call NAHI karein
   // Sirf data carry karein aur aage jaao
   const handleConfirm = async () => {
+    if (!hasVisibleRequiredData) {
+      Alert.alert('Passport not found', 'Name, passport number, date of birth and nationality must be visible before verification.');
+      return;
+    }
+    if (!nameMatchesBooking) {
+      Alert.alert('Passport not matched', 'Passport name does not match the booking passenger name.');
+      return;
+    }
+
     setIsLoading(true);
 
     apiService.updatePassportData({
@@ -154,6 +220,18 @@ const VerificationScreen = ({ navigation, route }) => {
         </Text>
       </View>
 
+      <ConfidenceMeter score={passportData?.confidence} isRTL={isRTL} />
+
+      {!canVerifyPassport ? (
+        <View style={styles.warningBox}>
+          <Text style={[styles.warningText, isRTL && styles.textRight]}>
+            {!hasVisibleRequiredData
+              ? 'Passport details not found clearly. Please retake or edit only after checking the document.'
+              : 'Passport name does not match the booking passenger name.'}
+          </Text>
+        </View>
+      ) : null}
+
       {/* PASSPORT IMAGE */}
       {passportImage && (
         <View style={styles.passportImageContainer}>
@@ -201,9 +279,9 @@ const VerificationScreen = ({ navigation, route }) => {
       {/* CONFIRM BUTTON */}
       <View style={styles.bottomArea}>
         <TouchableOpacity
-          style={[styles.confirmButton, isLoading && styles.confirmDisabled]}
+          style={[styles.confirmButton, (!canVerifyPassport || isLoading) && styles.confirmDisabled]}
           onPress={handleConfirm}
-          disabled={isLoading}
+          disabled={!canVerifyPassport || isLoading}
         >
           {isLoading ? (
             <ActivityIndicator color="#FFFFFF" />
@@ -226,41 +304,49 @@ const VerificationScreen = ({ navigation, route }) => {
 };
 
 const styles = StyleSheet.create({
-  keyboardView: { flex: 1, backgroundColor: theme.colors.white },
-  container: { flex: 1, backgroundColor: theme.colors.white, paddingHorizontal: 24 },
+  keyboardView: { flex: 1, backgroundColor: COLORS.bg },
+  container: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 24 },
   contentContainer: { paddingBottom: 24 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 60, marginBottom: 24 },
-  backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: theme.colors.cardMuted, alignItems: 'center', justifyContent: 'center', shadowColor: theme.colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
-  backArrow: { fontSize: 20, color: theme.colors.black },
-  stepBadge: { backgroundColor: theme.colors.cardMuted, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  stepText: { fontSize: 12, fontWeight: '600', color: theme.colors.black },
+  backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.line },
+  backArrow: { fontSize: 20, color: COLORS.text },
+  stepBadge: { backgroundColor: COLORS.card, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: COLORS.line },
+  stepText: { fontSize: 12, fontWeight: '600', color: COLORS.text },
   titleArea: { marginBottom: 24 },
-  title: { fontSize: 26, fontWeight: '800', color: theme.colors.black, marginBottom: 8 },
-  subtitle: { fontSize: 14, color: theme.colors.muted, lineHeight: 20 },
+  title: { fontSize: 26, fontWeight: '800', color: COLORS.text, marginBottom: 8 },
+  subtitle: { fontSize: 14, color: COLORS.muted, lineHeight: 20 },
+  confidenceCard: { backgroundColor: COLORS.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: COLORS.line, marginBottom: 14 },
+  confidenceTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 },
+  confidenceLabel: { flex: 1, color: COLORS.text, fontSize: 13, fontWeight: '800' },
+  confidenceScore: { fontSize: 16, fontWeight: '900' },
+  confidenceTrack: { height: 8, borderRadius: 999, backgroundColor: '#2E3138', overflow: 'hidden' },
+  confidenceFill: { height: '100%', borderRadius: 999 },
+  warningBox: { backgroundColor: 'rgba(239,51,64,0.12)', borderWidth: 1, borderColor: 'rgba(239,51,64,0.35)', borderRadius: 14, padding: 14, marginBottom: 18 },
+  warningText: { color: '#FFD0D4', fontSize: 13, fontWeight: '700', lineHeight: 19 },
   passportImageContainer: { marginBottom: 24, borderRadius: 16, overflow: 'hidden', position: 'relative' },
   passportThumbnail: { width: '100%', height: 160, borderRadius: 16 },
-  aiTag: { position: 'absolute', top: 12, right: 12, backgroundColor: theme.colors.careemGreen, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  aiTagText: { fontSize: 11, color: theme.colors.white, fontWeight: '600' },
+  aiTag: { position: 'absolute', top: 12, right: 12, backgroundColor: COLORS.green, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  aiTagText: { fontSize: 11, color: '#08100A', fontWeight: '800' },
   section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.black, marginBottom: 12 },
-  fieldContainer: { backgroundColor: theme.colors.cardMuted, borderRadius: 14, padding: 16, marginBottom: 8, shadowColor: theme.colors.black, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2, borderWidth: 1, borderColor: 'transparent' },
-  fieldLabel: { fontSize: 11, fontWeight: '600', color: theme.colors.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 12 },
+  fieldContainer: { backgroundColor: COLORS.card, borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: COLORS.line },
+  fieldLabel: { fontSize: 11, fontWeight: '600', color: COLORS.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
   fieldRow: { flexDirection: 'row', alignItems: 'center' },
-  fieldValue: { flex: 1, fontSize: 16, fontWeight: '500', color: theme.colors.black },
-  fieldInput: { flex: 1, fontSize: 16, fontWeight: '500', color: theme.colors.black, borderBottomWidth: 1.5, borderBottomColor: theme.colors.careemGreen, paddingVertical: 4 },
-  editButton: { width: 32, height: 32, borderRadius: 8, backgroundColor: theme.colors.white, alignItems: 'center', justifyContent: 'center' },
-  editButtonText: { fontSize: 14, color: theme.colors.careemGreen },
-  flightCard: { backgroundColor: theme.colors.cardMuted, borderRadius: 16, padding: 20, shadowColor: theme.colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3, borderWidth: 1, borderColor: 'transparent' },
+  fieldValue: { flex: 1, fontSize: 16, fontWeight: '500', color: COLORS.text },
+  fieldInput: { flex: 1, fontSize: 16, fontWeight: '500', color: COLORS.text, borderBottomWidth: 1.5, borderBottomColor: COLORS.green, paddingVertical: 4 },
+  editButton: { width: 32, height: 32, borderRadius: 8, backgroundColor: COLORS.panel, alignItems: 'center', justifyContent: 'center' },
+  editButtonText: { fontSize: 14, color: COLORS.green },
+  flightCard: { backgroundColor: COLORS.card, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: COLORS.line },
   flightRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
-  flightLabel: { fontSize: 13, color: theme.colors.muted },
-  flightValue: { fontSize: 15, fontWeight: '600', color: theme.colors.black },
-  divider: { height: 0.5, backgroundColor: theme.colors.line },
+  flightLabel: { fontSize: 13, color: COLORS.muted },
+  flightValue: { fontSize: 15, fontWeight: '600', color: COLORS.text },
+  divider: { height: 0.5, backgroundColor: COLORS.line },
   bottomArea: { gap: 12, paddingBottom: 40 },
-  confirmButton: { backgroundColor: theme.colors.careemGreen, borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
-  confirmDisabled: { backgroundColor: theme.colors.muted },
-  confirmText: { fontSize: 17, fontWeight: '700', color: theme.colors.white },
+  confirmButton: { backgroundColor: COLORS.green, borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
+  confirmDisabled: { backgroundColor: '#2E3138' },
+  confirmText: { fontSize: 17, fontWeight: '700', color: '#08100A' },
   rescanButton: { alignItems: 'center', paddingVertical: 8 },
-  rescanText: { fontSize: 14, color: theme.colors.careemGreen, textDecorationLine: 'underline' },
+  rescanText: { fontSize: 14, color: COLORS.green, textDecorationLine: 'underline' },
   textRight: { textAlign: 'right' },
 });
 

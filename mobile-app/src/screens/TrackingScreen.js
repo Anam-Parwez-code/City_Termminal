@@ -7,6 +7,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Platform,
 } from 'react-native';
 import { io } from 'socket.io-client';
 import { supabase } from '../services/supabaseClient';
@@ -102,7 +103,7 @@ const TrackingScreen = ({ navigation, route }) => {
       toValue: 1,
       damping: 18,
       stiffness: 110,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [sheetAnim]);
 

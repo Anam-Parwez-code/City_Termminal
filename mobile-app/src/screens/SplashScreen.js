@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import BrandMark from '../components/BrandMark';
 import theme from '../theme';
@@ -12,7 +12,7 @@ const SplashScreen = ({ navigation }) => {
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 1100,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
 
     const timer = setTimeout(() => {

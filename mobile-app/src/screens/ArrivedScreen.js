@@ -12,7 +12,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Animated, Dimensions,
+  ScrollView, Animated, Dimensions, Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
@@ -36,18 +36,19 @@ const ArrivedScreen = ({ navigation, route }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    const useNativeDriver = Platform.OS !== 'web';
     // Checkmark pop in animation
     Animated.sequence([
       Animated.spring(scaleAnim, {
         toValue: 1,
         tension: 50,
         friction: 5,
-        useNativeDriver: true,
+        useNativeDriver,
       }),
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 500,
-        useNativeDriver: true,
+        useNativeDriver,
       }),
     ]).start();
   }, []);

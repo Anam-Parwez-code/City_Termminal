@@ -173,7 +173,7 @@ const SlotBookingScreen = ({ navigation, route }) => {
       toValue: selectedSlot ? 1 : 0,
       damping: 18,
       stiffness: 120,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [selectedSlot, sheetAnim]);
 

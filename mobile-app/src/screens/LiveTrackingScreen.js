@@ -214,10 +214,11 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
   // ── Pulse animation ────────────────────────────────────
   useEffect(() => {
+    const useNativeDriver = Platform.OS !== 'web';
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.28, duration: 800, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1,    duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1.28, duration: 800, useNativeDriver }),
+        Animated.timing(pulseAnim, { toValue: 1,    duration: 800, useNativeDriver }),
       ]),
     ).start();
   }, [pulseAnim]);

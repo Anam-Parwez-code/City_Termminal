@@ -23,9 +23,10 @@ const COLORS = {
   text:      '#FFFFFF',
   muted:     '#A7B0C0',
 };
-
 const formatTime = (dateString) => {
   if (!dateString) return '--';
+  // Agar humne "  •  " already inject kar diya hai params se, toh as-is show karo
+  if (String(dateString).includes('•')) return dateString;
   try {
     if (/^\d{1,2}:\d{2}/.test(dateString)) return dateString.substring(0, 5);
     const d = new Date(dateString);
@@ -33,6 +34,7 @@ const formatTime = (dateString) => {
     return String(dateString);
   } catch { return String(dateString); }
 };
+
 
 const DetailRow = ({ label, value, action, loading }) => (
   <TouchableOpacity style={styles.detailRow} disabled={!action} onPress={action}>
@@ -90,29 +92,21 @@ const BookingConfirmScreen = ({ navigation, route }) => {
     setError(null);
 
     try {
-      // ── STEP 1: Pickup location from params ──────────────
-      const pickupName =
-        params.pickupLocation?.name ||
-        params.pickupLocation ||
-        params.confirmation?.locationName ||
-        null;
+      console.log('Final Params:', params)
+      // ── STEP 1: TimeSlot se aaye hue data ko prioritize karo ──
+      const pName = params.pickupLocation?.name || params.pickupLocation || params.slotDetails?.locationName || '--';
+      const term = params.destinationTerminal || '--';
+      
+      // Slot time ko sahi se handle karo
+      const sTime = params.slotDetails?.slotTime 
+                    ? new Date(params.slotDetails.slotTime).toISOString() 
+                    : params.selectedTimeSlot || null;
 
-      const terminal =
-        params.destinationTerminal ||
-        params.confirmation?.destinationTerminal ||
-        null;
+      setPickupLoc(pName);
+      setDestTerminal(term);
+      setPickupTime(sTime);
 
-      const slotTime =
-        params.selectedTimeSlot
-          ? `${params.selectedDate || ''} ${params.selectedTimeSlot}`
-          : params.confirmation?.slotTime || null;
-
-      setPickupLoc(pickupName);
-      setDestTerminal(terminal);
-      setPickupTime(slotTime);
-
-      // ── STEP 2: OTP Status → Vehicle + Driver ────────────
-      // GET /api/otp/status/:bookingId
+      // ── STEP 2: OTP Status check karo ────────────
       try {
         const otpRes = await apiService.getOTPStatus(bookingId);
         const st = otpRes?.status || otpRes?.assignment || {};
@@ -121,25 +115,30 @@ const BookingConfirmScreen = ({ navigation, route }) => {
           setVehicleId(st.vehicleId || st.vehicle_id);
           setDriverName(st.driverName || st.driver_name);
           setDriverPhone(st.driverPhone || st.driver_phone);
-          setPickupLoc(prev => st.pickupLocation || st.pickup_location || prev);
-          setDestTerminal(prev => st.destinationTerminal || st.destination_terminal || prev);
+          
+          // Agar API se data mil raha hai, tabhi override karo, warna mat karo
+          if(st.pickupLocation) setPickupLoc(st.pickupLocation);
+          if(st.destinationTerminal) setDestTerminal(st.destinationTerminal);
+          
           setStatus(st.statusLabel || st.status);
           setLoading(false);
           return;
         }
       } catch (e) {
-        console.warn('OTP status fetch failed:', e.message);
+        console.warn('OTP status check failed, proceeding to assign...');
       }
-
       // ── STEP 3: Agar vehicle nahi mila → assign karo ─────
       // POST /api/otp/assign
-      if (pickupName && terminal) {
+      if (pName && term && pName !== '--' && term !== '--') {
         setAssigning(true);
         try {
           const assignRes = await apiService.assignVehicle({
             bookingId,
-            pickupLocation: pickupName,
-            destinationTerminal: terminal,
+            pickupLocation: pName,
+            destinationTerminal: term,
+            pickupCoordinates: params.pickupLocation?.lat != null && params.pickupLocation?.lng != null
+              ? { lat: params.pickupLocation.lat, lng: params.pickupLocation.lng }
+              : null,
           });
 
           const a = assignRes?.assignment || assignRes?.status || {};
@@ -192,6 +191,7 @@ const BookingConfirmScreen = ({ navigation, route }) => {
         driverName:          driverName,
         driverPhone:         driverPhone,
         locationName:        pickupLoc,
+        pickupLocation:      pickupLoc,
         destinationTerminal: destTerminal,
         slotTime:            pickupTime,
       },

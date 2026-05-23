@@ -16,9 +16,9 @@ import axios from 'axios';
 // Windows: CMD → ipconfig → IPv4 Address
 // Mac/Linux: terminal → ifconfig
 // Mobile aur laptop EK HI WiFi pe hone chahiye!
-const BASE_URL = 'http://192.168.43.209:5000/api';
+const BASE_URL = 'http://192.168.36.224:5000/api';
 //                    ^^^^^^^^^^^ Yahan apna IP daalo
-const AI_BASE_URL = 'http://192.168.43.209:8000';
+const AI_BASE_URL = 'http://192.168.36.224:8000';
 
 export const getSocketBaseUrl = () => {
   const trimmed = BASE_URL.replace(/\/api\/?$/i, '').trim();
@@ -176,6 +176,16 @@ const apiService = {
     const result = await api.get('/slots/available');
     return result;
     // Returns: { success: true, slots: [...] }
+  },
+
+  recommendPickup: async (data) => {
+    const result = await api.post('/ai/recommend-pickup', data);
+    return result;
+  },
+
+  recommendSlot: async (data) => {
+    const result = await api.post('/ai/recommend-slot', data);
+    return result;
   },
 
   // ── SCREEN 6: BOOK A SLOT ────────────────────────────

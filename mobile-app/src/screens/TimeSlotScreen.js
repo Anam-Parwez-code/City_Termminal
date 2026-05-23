@@ -114,6 +114,16 @@ const TimeSlotScreen = ({ navigation, route }) => {
   const pickupLabel     = getPickupLabel(params);
   const pickupCoords    = params?.pickupLocation;
   const destTerminal    = params?.destinationTerminal || 'Airport Terminal';
+  const flightTime =
+    params.bookingData?.departureTime ||
+    params.bookingData?.departure_time ||
+    params.departureTime ||
+    null;
+  const flightNumber =
+    params.bookingData?.flightNumber ||
+    params.bookingData?.flight_number ||
+    params.flightNumber ||
+    '';
 
   const DATES = generateDates();
 
@@ -123,6 +133,8 @@ const TimeSlotScreen = ({ navigation, route }) => {
   const [allSlots,      setAllSlots]      = useState([]);
   const [loadingSlots,  setLoadingSlots]  = useState(true);
   const [slotError,     setSlotError]     = useState(null);
+  const [aiSlot,        setAiSlot]        = useState(null);
+  const [aiLoading,     setAiLoading]     = useState(false);
 
   useEffect(() => {
     fetchSlots();
@@ -135,6 +147,7 @@ const TimeSlotScreen = ({ navigation, route }) => {
       const res   = await apiService.getAvailableSlots();
       const slots = res?.slots || res?.data || [];
       setAllSlots(slots);
+      fetchAIRecommendation(slots);
 
       if (slots.length === 0) {
         setSlotError('No slots available right now. Please try again later.');
@@ -144,6 +157,31 @@ const TimeSlotScreen = ({ navigation, route }) => {
       setSlotError('Could not load slots. Check your connection.');
     } finally {
       setLoadingSlots(false);
+    }
+  };
+
+  const fetchAIRecommendation = async (slots) => {
+    if (!slots || slots.length === 0) {
+      setAiSlot(null);
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const result = await apiService.recommendSlot({
+        flightNumber,
+        flightTime,
+        terminal: destTerminal,
+        pickupLocation: pickupLabel,
+        pickupCoordinates: pickupCoords,
+        travelTime: 35,
+        slots,
+        language: i18n.language || 'en',
+      });
+      setAiSlot(result?.recommendation || result || null);
+    } catch (_err) {
+      setAiSlot(null);
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -271,6 +309,12 @@ const TimeSlotScreen = ({ navigation, route }) => {
             <Text style={styles.refreshText}>↻ Refresh</Text>
           </TouchableOpacity>
         </View>
+        {aiLoading ? (
+          <View style={styles.aiLoadingRow}>
+            <ActivityIndicator size="small" color={COLORS.green} />
+            <Text style={styles.aiLoadingText}>AI analyzing best slot...</Text>
+          </View>
+        ) : null}
 
         {loadingSlots ? (
           <View style={styles.loadingBox}>
@@ -297,6 +341,10 @@ const TimeSlotScreen = ({ navigation, route }) => {
               const availSeats = getAvailableSeats(slot);
               const isFull     = availSeats <= 0;
               const isLow      = availSeats <= 3 && !isFull;
+              const isAiPick   = aiSlot?.recommendedSlotId != null && String(aiSlot.recommendedSlotId) === String(slot.id);
+              const aiReason   = i18n.language === 'ar'
+                ? aiSlot?.reason_ar || aiSlot?.reason_en
+                : aiSlot?.reason_en || aiSlot?.reason_ar;
 
               return (
                 <TouchableOpacity
@@ -304,12 +352,16 @@ const TimeSlotScreen = ({ navigation, route }) => {
                   style={[
                     styles.slotCard,
                     isSelected && styles.slotCardSelected,
+                    isAiPick   && styles.slotCardAi,
                     isFull     && styles.slotCardFull,
                   ]}
                   onPress={() => !isFull && setSelectedSlot(slot)}
                   disabled={isFull}
                   activeOpacity={0.7}
                 >
+                  {isAiPick ? (
+                    <Text style={styles.aiPickBadge}>{i18n.language === 'ar' ? '🤖 اختيار AI' : '🤖 AI Pick'}</Text>
+                  ) : null}
                   <Text style={[styles.slotTime, isSelected && styles.slotTimeSelected]}>
                     {formatSlotTime(slot.slot_time)}
                   </Text>
@@ -326,6 +378,12 @@ const TimeSlotScreen = ({ navigation, route }) => {
                   {pickupLabel ? (
                     <Text style={styles.slotPickupHint} numberOfLines={1}>
                       📍 {pickupLabel}
+                    </Text>
+                  ) : null}
+
+                  {isAiPick && aiReason ? (
+                    <Text style={styles.aiReason} numberOfLines={3}>
+                      {aiReason}{aiSlot?.idealPickupTime ? ` Ideal: ${aiSlot.idealPickupTime}` : ''}
                     </Text>
                   ) : null}
 
@@ -476,6 +534,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
   },
   refreshText: { color: COLORS.green, fontWeight: '700', fontSize: 14 },
+  aiLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(71,211,97,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(71,211,97,0.18)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  aiLoadingText: { color: COLORS.green, fontSize: 12, fontWeight: '800' },
 
   dateScroll:  { flexDirection: 'row', marginBottom: 28 },
   dateBubble: {
@@ -510,7 +581,20 @@ const styles = StyleSheet.create({
     padding: 14, borderWidth: 1, borderColor: COLORS.line,
   },
   slotCardSelected: { backgroundColor: '#163A1C', borderColor: COLORS.green },
+  slotCardAi: { borderColor: COLORS.green },
   slotCardFull:     { opacity: 0.4 },
+  aiPickBadge: {
+    alignSelf: 'flex-start',
+    color: COLORS.green,
+    backgroundColor: '#163A1C',
+    borderRadius: 999,
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 10,
+    fontWeight: '900',
+    marginBottom: 7,
+  },
   slotTime:     { color: COLORS.text, fontWeight: '800', fontSize: 15, marginBottom: 4 },
   slotTimeSelected: { color: COLORS.green },
   slotLocation: { color: COLORS.muted, fontSize: 11, marginBottom: 4 },
@@ -519,6 +603,7 @@ const styles = StyleSheet.create({
     color: COLORS.muted, fontSize: 10, fontWeight: '600',
     marginBottom: 8, opacity: 0.7,
   },
+  aiReason: { color: '#D7F6DF', fontSize: 10, fontWeight: '700', lineHeight: 15, marginBottom: 8 },
   slotBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   seatsText:  { color: COLORS.muted, fontSize: 11, fontWeight: '600' },
   seatsLow:   { color: COLORS.amber },
