@@ -200,10 +200,17 @@ const getAssignmentByBookingId = async (bookingId) => {
 
 const buildBarcodePayload = (assignment, overrides = {}) =>
   JSON.stringify({
+    type:               overrides.reachedAirport ? 'digital_boarding_pass' : 'baggage_receipt',
+    documentType:       overrides.reachedAirport ? 'Digital Boarding Pass' : 'Baggage Receipt',
     bookingId:           assignment.booking_id,
     vehicleId:           assignment.vehicle_id,
     driverName:          assignment.driver_name,
     driverPhone:         assignment.driver_phone,
+    passengerName:       overrides.passengerName || null,
+    flightNumber:        overrides.flightNumber || null,
+    destination:         overrides.destination || null,
+    departureTime:       overrides.departureTime || null,
+    bagStatus:           overrides.reachedAirport ? 'At terminal' : 'With driver',
     pickupLocation:      assignment.pickup_location,
     destinationTerminal: assignment.destination_terminal,
     issuedAt:            new Date().toISOString(),
@@ -398,10 +405,37 @@ const assignVehicle = async (req, res) => {
           assignment: toClientStatus(refreshed, resolveEffectiveStatus(refreshed), flight),
         });
       }
+      const barcodePayload = JSON.stringify({
+        bookingId,
+        vehicleId: existing.vehicle_id,
+        driverName: existing.driver_name,
+        driverPhone: existing.driver_phone,
+        pickupLocation,
+        destinationTerminal,
+        pickupCoordinates: pickupCoordinates || null,
+        timestamp: new Date().toISOString(),
+      });
+      await pool.query(
+        `UPDATE vehicle_assignments
+         SET pickup_location=$1,
+             destination_terminal=$2,
+             barcode_data=$3,
+             current_location=$4,
+             updated_at=NOW()
+         WHERE id=$5`,
+        [
+          pickupLocation,
+          destinationTerminal,
+          barcodePayload,
+          `Driver dispatched to ${pickupLocation}`,
+          existing.id,
+        ]
+      );
+      const refreshed = await getAssignmentByBookingId(bookingId);
       const flight = await fetchFlightBlock(bookingId);
       return res.status(200).json({
-        success: true, message: 'Vehicle already assigned',
-        assignment: toClientStatus(existing, resolveEffectiveStatus(existing), flight),
+        success: true, message: 'Vehicle assignment synced',
+        assignment: toClientStatus(refreshed, resolveEffectiveStatus(refreshed), flight),
       });
     }
 
@@ -550,7 +584,10 @@ const verifyVehicle = async (req, res) => {
       fallback.barcode_scanned  = false;
       fallback.luggage_tagged   = false;
       fallback.status           = 'barcode_issued';
-      fallback.barcode_data     = buildBarcodePayload(fallback);
+      fallback.barcode_data     = buildBarcodePayload(fallback, {
+        bagStatus: 'With driver',
+        reachedAirport: false,
+      });
       fallback.current_location = 'Boarding barcode issued — luggage tag synced with dashboard';
       fallback.updated_at       = new Date();
 
@@ -602,7 +639,15 @@ const verifyVehicle = async (req, res) => {
     // }
 
     // ★ Build barcode + UPDATE in one atomic query
-    const barcodePayload = buildBarcodePayload(assignment);
+    const flight = await fetchFlightBlock(bookingId);
+    const barcodePayload = buildBarcodePayload(assignment, {
+      passengerName: flight?.passengerName,
+      flightNumber: flight?.flightNumber,
+      destination: flight?.destination,
+      departureTime: flight?.departureTime,
+      bagStatus: 'With driver',
+      reachedAirport: false,
+    });
 
     const updateResult = await pool.query(
       `UPDATE vehicle_assignments
@@ -624,7 +669,6 @@ const verifyVehicle = async (req, res) => {
 
     // ★ Re-fetch so we read vehicle_verified=true back from Postgres
     const rowAfter  = await getAssignmentByBookingId(bookingId);
-    const flight    = await fetchFlightBlock(bookingId);
     const statusObj = toClientStatus(rowAfter || updateResult.rows[0], 'barcode_issued', flight);
 
     console.log(
@@ -789,12 +833,24 @@ const reachedAirport = async (req, res) => {
     const assignment = await getAssignmentByBookingId(bookingId);
     if (!assignment) return res.status(404).json({ success: false, message: 'Vehicle assignment not found' });
 
+    const flight = await fetchFlightBlock(assignment.booking_id);
+    const boardingPassPayload = buildBarcodePayload(assignment, {
+      passengerName: flight?.passengerName,
+      flightNumber: flight?.flightNumber,
+      destination: flight?.destination,
+      departureTime: flight?.departureTime,
+      bagStatus: 'At terminal',
+      reachedAirport: true,
+      airportConfirmedAt: new Date().toISOString(),
+    });
+
     const result = await pool.query(
       `UPDATE vehicle_assignments
        SET reached_airport=true, status='at_airport',
+           barcode_data=$2,
            current_location=destination_terminal, updated_at=NOW()
        WHERE id=$1 RETURNING *`,
-      [assignment.id]
+      [assignment.id, boardingPassPayload]
     );
     await pool.query(`UPDATE drivers SET is_available=true WHERE vehicle_id=$1`, [assignment.vehicle_id]);
 
@@ -812,10 +868,18 @@ const reachedAirport = async (req, res) => {
       driver_name: assignment.driver_name, driver: assignment.driver_name,
       status: 'Arrived — At Airport',
       current_location: assignment.destination_terminal,
+      statusLabel: 'Your bag has reached the terminal.',
+      vehicleVerified: true,
+      barcodeData: boardingPassPayload,
+      barcode_data: boardingPassPayload,
+      notification: {
+        title: 'Bag reached terminal',
+        body: 'Your bag has reached the terminal.',
+      },
+      flight,
       updated_at: new Date().toISOString(),
     });
 
-    const flight = await fetchFlightBlock(assignment.booking_id);
     return res.status(200).json({
       success: true, message: 'Driver reached airport',
       status: toClientStatus(result.rows[0], 'at_airport', flight), flight,
@@ -919,6 +983,10 @@ const markAtPickup = async (req, res) => {
       vehicle_number: assignment.vehicle_id, vehicleId: assignment.vehicle_id,
       status: 'Arrived at Pickup',
       current_location: result.rows[0]?.current_location,
+      notification: {
+        title: 'Driver arrived',
+        body: 'Your driver has reached the pickup location.',
+      },
       updated_at: new Date().toISOString(),
     });
     return res.status(200).json({ success: true, status: toClientStatus(row || result.rows[0], 'arrived_pickup') });

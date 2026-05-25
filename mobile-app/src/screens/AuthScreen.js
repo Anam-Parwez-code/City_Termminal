@@ -1,6 +1,12 @@
 // ============================================================
 // FILE: mobile-app/src/screens/AuthScreen.js
-// FIXED — Arabic/English toggle added
+// FIXED — Correct routing after login/signup
+// ============================================================
+// LOGIC:
+// Login/Signup ke baad:
+// 1. Koi saved booking nahi → BookingEntry (fresh start)
+// 2. Booking hai + barcode generate hua → UserProfile
+// 3. Booking hai + barcode nahi → BookingEntry (continue flow)
 // ============================================================
 
 import React, { useState } from 'react';
@@ -34,9 +40,16 @@ const AuthScreen = ({ navigation }) => {
   const [isAvailable, setIsAvailable] = useState(true);
   const [loading,     setLoading]     = useState(false);
 
-  // ── Bilingual text helper ─────────────────────────────
   const T = (en, ar) => isRTL ? ar : en;
 
+  // ── ROUTING LOGIC — Fixed ────────────────────────────────
+  // Sirf tab UserProfile pe jao jab barcode generate hua ho
+  // yaani vehicle_verified = true
+  const routeAfterAuth = async () => {
+    navigation.replace('BookingEntry');
+  };
+
+  // ── SUBMIT ────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (mode === 'driver') {
       if (!driverId.trim()) {
@@ -50,7 +63,7 @@ const AuthScreen = ({ navigation }) => {
       try {
         await saveDriverSession('', driverId.trim().toUpperCase());
         navigation.replace('DriverTrip');
-      } catch (err) {
+      } catch {
         Alert.alert(
           T('Login failed', 'فشل تسجيل الدخول'),
           T('Could not authenticate driver.', 'تعذر التحقق من هوية السائق.')
@@ -84,11 +97,11 @@ const AuthScreen = ({ navigation }) => {
         });
       }
 
-      const currentBookingId = await adminService.getCurrentBookingId();
-      navigation.replace('BookingEntry', { bookingId: currentBookingId });
+      await routeAfterAuth();
 
     } catch (err) {
-      const message = err?.response?.data?.message || err.message || T('Please try again', 'يرجى المحاولة مرة أخرى');
+      const message = err?.response?.data?.message || err.message
+        || T('Please try again', 'يرجى المحاولة مرة أخرى');
       Alert.alert(
         mode === 'signup'
           ? T('Create account failed', 'فشل إنشاء الحساب')
@@ -110,8 +123,6 @@ const AuthScreen = ({ navigation }) => {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-
-        {/* Hero */}
         <View style={styles.hero}>
           <BrandMark size="lg" />
           <Text style={[styles.title, isRTL && styles.textRight]}>
@@ -125,10 +136,7 @@ const AuthScreen = ({ navigation }) => {
           </Text>
         </View>
 
-        {/* Card */}
         <View style={styles.card}>
-
-          {/* Mode toggle */}
           <View style={[styles.switchRow, isRTL && styles.rtlRow]}>
             <TouchableOpacity
               style={[styles.switchBtn, mode === 'login' && styles.switchBtnActive]}
@@ -156,7 +164,6 @@ const AuthScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
-          {/* Driver mode */}
           {mode === 'driver' ? (
             <>
               <TextInput
@@ -214,7 +221,6 @@ const AuthScreen = ({ navigation }) => {
             </>
           )}
 
-          {/* Submit button */}
           <TouchableOpacity
             style={[styles.submitButton, loading && styles.disabledBtn]}
             disabled={loading}
@@ -230,9 +236,7 @@ const AuthScreen = ({ navigation }) => {
                     : T('Login', 'تسجيل الدخول')}
             </Text>
           </TouchableOpacity>
-
         </View>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -241,32 +245,21 @@ const AuthScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   keyboardView: { flex: 1, backgroundColor: theme.colors.white },
   container:    { flexGrow: 1, padding: 24, justifyContent: 'center' },
-
-  hero:      { alignItems: 'center', marginBottom: 26 },
-  title:     { color: theme.colors.black, fontSize: theme.fontSizes.title, lineHeight: 38, fontWeight: '900', marginTop: 22, marginBottom: 8, textAlign: 'center' },
-  subtitle:  { color: theme.colors.muted, fontSize: theme.fontSizes.md, lineHeight: 22, textAlign: 'center', paddingHorizontal: 12 },
-  textRight: { textAlign: 'right' },
-
-  card: { backgroundColor: theme.colors.cardMuted, borderRadius: theme.radii.card, padding: 16, ...theme.shadows.card },
-
-  switchRow:   { flexDirection: 'row', marginBottom: 16, backgroundColor: theme.colors.white, borderRadius: 14, padding: 4 },
-  rtlRow:      { flexDirection: 'row-reverse' },
-  switchBtn:   { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  hero:         { alignItems: 'center', marginBottom: 26 },
+  title:        { color: theme.colors.black, fontSize: theme.fontSizes.title, lineHeight: 38, fontWeight: '900', marginTop: 22, marginBottom: 8, textAlign: 'center' },
+  subtitle:     { color: theme.colors.muted, fontSize: theme.fontSizes.md, lineHeight: 22, textAlign: 'center', paddingHorizontal: 12 },
+  textRight:    { textAlign: 'right' },
+  card:         { backgroundColor: theme.colors.cardMuted, borderRadius: theme.radii.card, padding: 16, ...theme.shadows.card },
+  switchRow:    { flexDirection: 'row', marginBottom: 16, backgroundColor: theme.colors.white, borderRadius: 14, padding: 4 },
+  rtlRow:       { flexDirection: 'row-reverse' },
+  switchBtn:    { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
   switchBtnActive: { backgroundColor: theme.colors.black },
   switchTxt:       { color: theme.colors.black, fontWeight: '800' },
   switchTxtActive: { color: theme.colors.white },
-
-  input: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 14, color: theme.colors.black,
-    marginBottom: 12, paddingHorizontal: 16, paddingVertical: 15,
-    fontSize: theme.fontSizes.md, fontWeight: '700',
-  },
-  inputRTL: { textAlign: 'right' },
-
-  availRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4 },
-  availTxt: { flex: 1, color: theme.colors.black, fontWeight: '700' },
-
+  input: { backgroundColor: theme.colors.white, borderRadius: 14, color: theme.colors.black, marginBottom: 12, paddingHorizontal: 16, paddingVertical: 15, fontSize: theme.fontSizes.md, fontWeight: '700' },
+  inputRTL:     { textAlign: 'right' },
+  availRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4 },
+  availTxt:     { flex: 1, color: theme.colors.black, fontWeight: '700' },
   submitButton: { backgroundColor: theme.colors.careemGreen, borderRadius: theme.radii.button, paddingVertical: 18, marginTop: 6, alignItems: 'center' },
   disabledBtn:  { opacity: 0.6 },
   submitText:   { color: theme.colors.white, fontWeight: '900', fontSize: theme.fontSizes.md },

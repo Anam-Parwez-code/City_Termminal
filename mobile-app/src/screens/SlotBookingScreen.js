@@ -57,6 +57,26 @@ const formatDate = (dateString) => {
   });
 };
 
+const parseDateTime = (value) => {
+  if (!value) return null;
+  let date = new Date(value);
+  if (isNaN(date.getTime()) && typeof value === 'string') {
+    date = new Date(value.replace(' ', 'T'));
+  }
+  if (isNaN(date.getTime()) && typeof value === 'string') {
+    const match = value.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i);
+    if (match) {
+      const [, dd, mm, yy, hh = '0', min = '0', meridian] = match;
+      const fullYear = yy.length === 2 ? `20${yy}` : yy;
+      let hour = Number(hh);
+      if (meridian?.toLowerCase() === 'pm' && hour < 12) hour += 12;
+      if (meridian?.toLowerCase() === 'am' && hour === 12) hour = 0;
+      date = new Date(Number(fullYear), Number(mm) - 1, Number(dd), hour, Number(min));
+    }
+  }
+  return isNaN(date.getTime()) ? null : date;
+};
+
 // ============================================================
 // SLOT CARD COMPONENT — Har slot ke liye card
 // ============================================================
@@ -156,12 +176,20 @@ const SlotBookingScreen = ({ navigation, route }) => {
   const sheetAnim = useRef(new Animated.Value(0)).current;
 
   const filteredSlots = React.useMemo(() => {
-    const q = slotQuery.trim().toLowerCase();
-    if (!q) return slots;
-    return slots.filter((slot) =>
-      `${slot.location_name} ${slot.location_address}`.toLowerCase().includes(q),
+    const departure = parseDateTime(
+      bookingData?.departureTime ||
+      bookingData?.departure_time ||
+      bookingData?.flightTime ||
+      bookingData?.flight_time,
     );
-  }, [slots, slotQuery]);
+    const q = slotQuery.trim().toLowerCase();
+    return slots.filter((slot) => {
+      const slotDate = parseDateTime(slot.slot_time);
+      const beforeFlight = !departure || (slotDate && slotDate <= departure);
+      const matchesQuery = !q || `${slot.location_name} ${slot.location_address}`.toLowerCase().includes(q);
+      return beforeFlight && matchesQuery;
+    });
+  }, [bookingData, slots, slotQuery]);
 
   // ── FETCH SLOTS — Screen load hone pe ───────────────────
   useEffect(() => {
@@ -181,7 +209,7 @@ const SlotBookingScreen = ({ navigation, route }) => {
     setIsLoadingSlots(true);
     try {
       // GET /api/slots/available
-      const result = await apiService.getAvailableSlots();
+      const result = await apiService.getAvailableSlots({ bookingId: resolvedBookingId });
       setSlots(result.slots || []);
     } catch (error) {
       Alert.alert(t('common.error'), t('slotBooking.tryLater'));

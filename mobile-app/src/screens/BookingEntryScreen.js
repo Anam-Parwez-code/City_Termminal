@@ -25,6 +25,7 @@ import {
 
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
+import adminService from '../services/adminService';
 import PassportScan from './PassportScanScreen'; // Hamara API helper
 import BrandMark from '../components/BrandMark';
 import theme from '../theme';
@@ -64,6 +65,14 @@ const BookingEntryScreen = ({ navigation }) => {
 
   // showAirlineList → Airline dropdown open/close
   const [showAirlineList, setShowAirlineList] = useState(false);
+
+  const isCompletedBooking = (bookingData = {}) => {
+    const status = String(bookingData.vehicle_status || bookingData.status || '').toLowerCase();
+    const vehicleVerified = bookingData.vehicle_verified === true || bookingData.vehicleVerified === true;
+    const hasBarcode = Boolean(bookingData.barcode_data || bookingData.barcodeData);
+    return Boolean(vehicleVerified && hasBarcode) ||
+      ['barcode_issued', 'en_route_airport', 'at_airport'].includes(status);
+  };
 
   // ─── VALIDATION ───────────────────────────────────────────
   // Check karo ki user ne sab sahi dala hai ya nahi
@@ -114,11 +123,22 @@ const BookingEntryScreen = ({ navigation }) => {
 
       // ── SUCCESS ───────────────────────────────────────────
       if (result.valid) {
-        // Passport Scan screen pe jaao
-        // result.bookingData → sab booking details saath bhejo
+        const nextBookingId = bookingId.trim().toUpperCase();
+        await adminService.saveCurrentBookingId(nextBookingId);
+
+        if (isCompletedBooking(result.bookingData)) {
+          navigation.replace('UserProfile', {
+            bookingData: result.bookingData,
+            bookingId: nextBookingId,
+            airline: selectedAirline,
+            notice: 'already_boarded',
+          });
+          return;
+        }
+
         navigation.navigate('PassportScan', {
           bookingData: result.bookingData, // Yahan flight details hain
-          bookingId: bookingId.trim().toUpperCase(),
+          bookingId: nextBookingId,
           airline: selectedAirline,
         });
       }

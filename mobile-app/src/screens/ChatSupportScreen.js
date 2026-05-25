@@ -14,6 +14,55 @@ import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
 import adminService from '../services/adminService';
 
+const getLiveParts = (live) => {
+  const vehicle = live?.live?.vehicle || live?.vehicle || {};
+  const flight = live?.live?.flight || live?.live?.booking || live?.flight || live?.booking || {};
+  return { vehicle, flight };
+};
+
+const buildLocalReply = ({ text, bookingId, live, isRTL }) => {
+  const lower = String(text || '').toLowerCase();
+  const { vehicle, flight } = getLiveParts(live);
+  const vehicleStatus = vehicle?.status || vehicle?.vehicle_status || 'not assigned yet';
+  const location = vehicle?.current_location || vehicle?.location || vehicle?.pickup_location || 'not available';
+  const flightStatus = flight?.status || flight?.flight_status || 'not available';
+
+  if (isRTL) {
+    if (!bookingId) return 'Please share your booking ID first so I can check live trip details.';
+    return `Booking ${bookingId}: vehicle ${vehicleStatus}, location ${location}, flight ${flightStatus}.`;
+  }
+
+  if (!bookingId) {
+    return 'Please share your booking ID first. After that I can help with vehicle status, QR/barcode, flight, pickup point, and slots.';
+  }
+
+  if (lower.includes('qr') || lower.includes('barcode') || lower.includes('code')) {
+    return `For booking ${bookingId}, your QR/barcode is shown after slot confirmation. If the vehicle is assigned, open the booking confirmation or barcode screen and keep it ready for pickup.`;
+  }
+
+  if (lower.includes('vehicle') || lower.includes('driver') || lower.includes('car') || lower.includes('van')) {
+    return `Booking ${bookingId}: vehicle status is ${vehicleStatus}. Current location: ${location}.`;
+  }
+
+  if (lower.includes('flight')) {
+    return `Booking ${bookingId}: flight status is ${flightStatus}. If this looks outdated, refresh tracking once your airport network is stable.`;
+  }
+
+  if (lower.includes('slot') || lower.includes('time')) {
+    return `For booking ${bookingId}, choose the earliest available pickup slot that gives you enough buffer for luggage and immigration. If no slot appears, refresh slots or try again in a minute.`;
+  }
+
+  if (lower.includes('pickup') || lower.includes('location') || lower.includes('terminal')) {
+    return `For booking ${bookingId}, follow the pickup location shown in the app. If your terminal changes, update the pickup point before confirming the slot.`;
+  }
+
+  if (lower.includes('passport') || lower.includes('verify')) {
+    return 'Passport scan is currently in demo mode, so any uploaded photo can continue to verification. Please review/edit the details on the verification screen before moving ahead.';
+  }
+
+  return `I can help with booking ${bookingId}. Ask me about vehicle status, QR/barcode, flight status, pickup location, passport verification, or available slots.`;
+};
+
 const ChatSupportScreen = ({ navigation, route }) => {
   const { i18n } = useTranslation();
   const isRTL = i18n.dir() === 'rtl';
@@ -100,22 +149,21 @@ const ChatSupportScreen = ({ navigation, route }) => {
           }
         },
       });
+      if (assistantText.trim()) {
+        finalizeAssistantDraft();
+      } else {
+        throw new Error('Empty chat response');
+      }
     } catch (_err) {
-      let fallbackText = isRTL
-        ? 'تعذر الاتصال بالمساعد الآن. سأحاول عرض الحالة المباشرة من بيانات الحجز.'
-        : 'Chat connection failed. I will try to show live booking status instead.';
+      let live = null;
       try {
         if (bookingId) {
-          const live = await apiService.getLiveTripStatus({ bookingId });
-          const vehicle = live?.live?.vehicle;
-          const flight = live?.live?.flight || live?.live?.booking;
-          fallbackText = isRTL
-            ? `حالة الحجز ${bookingId}: المركبة ${vehicle?.status || 'غير متاحة'}، الموقع ${vehicle?.current_location || 'غير متاح'}، الرحلة ${flight?.status || 'غير متاحة'}.`
-            : `Booking ${bookingId}: vehicle ${vehicle?.status || 'unknown'}, location ${vehicle?.current_location || 'unknown'}, flight ${flight?.status || 'unknown'}.`;
+          live = await apiService.getLiveTripStatus({ bookingId });
         }
       } catch (_liveErr) {
-        // Keep connection fallback.
+        // Local support still works when the AI/live-status service is down.
       }
+      const fallbackText = buildLocalReply({ text, bookingId, live, isRTL });
       upsertAssistantDraft(fallbackText);
       finalizeAssistantDraft();
     } finally {

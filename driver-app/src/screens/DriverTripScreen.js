@@ -38,9 +38,8 @@ export default function DriverTripScreen({ navigation }) {
   }, [socket]);
 
   useEffect(() => {
-    loadDriverSession().then(({ bookingId: b, vehicleId: v }) => {
+    loadDriverSession().then(({ bookingId: b }) => {
       if (b) setBookingId(b);
-      if (v) setVehicleId(v);
     });
   }, []);
 
@@ -53,7 +52,7 @@ export default function DriverTripScreen({ navigation }) {
 
   const requireIds = () => {
     if (!bookingId.trim() || !vehicleId.trim()) {
-      Alert.alert('Required', 'Enter Booking ID and Vehicle ID (e.g. CT-102) first.');
+      Alert.alert('Required', 'Enter Booking ID and Vehicle ID first.');
       return false;
     }
     return true;
@@ -203,15 +202,16 @@ export default function DriverTripScreen({ navigation }) {
   const startAirportTrip = async () => {
     if (!requireIds()) return;
     try {
-      await driverClient.post('/otp/airport-trip', { bookingId: bookingId.trim() });
+      const { data: result } = await driverClient.post('/otp/airport-trip', { bookingId: bookingId.trim() });
       socket.emit('status_update', {
         bookingId: bookingId.trim(),
         booking_id: bookingId.trim(),
         vehicle_number: vehicleId.trim(),
         vehicleId: vehicleId.trim(),
-        status: 'Barcode issued',
-        vehicleVerified: true, // 👈 Yeh add kar do
+        status: 'En route to Airport',
+        vehicleVerified: true,
         barcode_data: result?.status?.barcodeData || result?.status?.barcode_data,
+        barcodeData: result?.status?.barcodeData || result?.status?.barcode_data,
         updated_at: new Date().toISOString(),
       });
       append('Marked heading to airport ✓');
@@ -315,7 +315,7 @@ export default function DriverTripScreen({ navigation }) {
         </TouchableOpacity>
 
         <Text style={styles.note}>
-          Enter the passenger Booking ID and your roster Vehicle ID (must match drivers DB e.g. CT-102). If the
+          Enter the passenger Booking ID and your roster Vehicle ID. If the
           passenger has not confirmed pickup yet, the server will still link this van to the booking when possible.
         </Text>
 
@@ -330,7 +330,7 @@ export default function DriverTripScreen({ navigation }) {
 
         <Text style={styles.label}>Vehicle ID</Text>
         <TextInput
-          placeholder="CT-102"
+          placeholder="Enter vehicle ID"
           value={vehicleId}
           onChangeText={setVehicleId}
           autoCapitalize="characters"

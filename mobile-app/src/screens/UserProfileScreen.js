@@ -8,16 +8,16 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, ActivityIndicator, RefreshControl,
+  Alert,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useTranslation } from 'react-i18next';
 import { io } from 'socket.io-client';
-import apiService from '../services/apiService';
+import apiService, { getSocketBaseUrl } from '../services/apiService';
 import theme from '../theme';
 
 // Socket origin from apiService base URL
-const _apiBase = apiService?.defaults?.baseURL || '';
-const socketOrigin = _apiBase.replace(/\/api\/?.*$/, '') || 'http://localhost:5000';
+const socketOrigin = getSocketBaseUrl?.() || 'http://localhost:5000';
 
 const COLORS = {
   bg:    '#0A0A0B',
@@ -68,6 +68,16 @@ const Card = ({ title, children, titleColor }) => (
 
 const Divider = () => <View style={styles.divider} />;
 
+const parseBarcodePayload = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_err) {
+    return {};
+  }
+};
+
 // ════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════
@@ -92,10 +102,11 @@ const UserProfileScreen = ({ navigation, route }) => {
 
   // Passenger data
   const [passenger, setPassenger] = useState({
-    name: 'Loading...',
+    name: pick(params.bookingData?.passengerName, params.bookingData?.passenger_name, params.bookingData?.name, 'Loading...') || 'Loading...',
     phone: EMPTY,
-    passportNumber: EMPTY,
-    nationality: EMPTY,
+    passportNumber: pick(params.bookingData?.passportNumber, params.bookingData?.passport_number, params.passportData?.passportNumber, EMPTY) || EMPTY,
+    nationality: pick(params.bookingData?.nationality, params.passportData?.nationality, EMPTY) || EMPTY,
+    dateOfBirth: pick(params.bookingData?.dateOfBirth, params.bookingData?.date_of_birth, params.passportData?.dateOfBirth, EMPTY) || EMPTY,
   });
 
   // Flight data
@@ -122,6 +133,8 @@ const UserProfileScreen = ({ navigation, route }) => {
   });
 
   const socketRef = useRef(null);
+  const notifiedPickupRef = useRef(false);
+  const notifiedAirportRef = useRef(false);
 
   // ── MAIN FETCH FUNCTION ────────────────────────────
   // bookings table se passenger + flight data
@@ -164,8 +177,9 @@ const UserProfileScreen = ({ navigation, route }) => {
         setPassenger({
           name:           pick(bd.passenger_name, bd.passengerName, 'Passenger') || 'Passenger',
           phone:          pick(bd.passenger_phone, bd.passengerPhone, EMPTY) || EMPTY,
-          passportNumber: pick(bd.passport_number, bd.passportNumber, EMPTY) || EMPTY,
-          nationality:    pick(bd.nationality, EMPTY) || EMPTY,
+          passportNumber: pick(bd.passport_number, bd.passportNumber, params.bookingData?.passportNumber, params.bookingData?.passport_number, params.passportData?.passportNumber, EMPTY) || EMPTY,
+          nationality:    pick(bd.nationality, params.bookingData?.nationality, params.passportData?.nationality, EMPTY) || EMPTY,
+          dateOfBirth:    pick(bd.date_of_birth, bd.dateOfBirth, bd.dob, params.bookingData?.dateOfBirth, params.bookingData?.date_of_birth, params.passportData?.dateOfBirth, EMPTY) || EMPTY,
         });
 
         setFlight({
@@ -250,6 +264,12 @@ const UserProfileScreen = ({ navigation, route }) => {
     fetchAllData();
   }, [fetchAllData]);
 
+  useEffect(() => {
+    if (params.notice === 'already_boarded') {
+      Alert.alert('Already onboarded', 'Your booking is already active. Your barcode and flight details are here.');
+    }
+  }, [params.notice]);
+
   // ── Poll every 8 seconds ──────────────────────────
   useEffect(() => {
     const interval = setInterval(() => fetchAllData(true), 8000);
@@ -263,7 +283,7 @@ const UserProfileScreen = ({ navigation, route }) => {
     const socket = io(socketOrigin, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
-    socket.emit('join', { room: `booking:${bookingId}` });
+    socket.emit('join_booking', { bookingId });
 
     socket.on('status_update', (payload) => {
       const pBid = payload?.bookingId || payload?.booking_id || '';
@@ -291,6 +311,16 @@ const UserProfileScreen = ({ navigation, route }) => {
         currentLocation: pick(payload.current_location, payload.currentLocation, prev.currentLocation),
         reachedAirport:  payload.reachedAirport === true || payload.reached_airport === true || prev.reachedAirport,
       }));
+
+      const normalizedStatus = String(payload.status || '').toLowerCase().replace(/\s+/g, '_');
+      if (!notifiedPickupRef.current && (normalizedStatus.includes('pickup') || payload.reachedPickup || payload.reached_pickup)) {
+        notifiedPickupRef.current = true;
+        Alert.alert('Driver arrived', 'Your driver has reached the pickup location.');
+      }
+      if (!notifiedAirportRef.current && (normalizedStatus.includes('airport') || payload.reachedAirport || payload.reached_airport)) {
+        notifiedAirportRef.current = true;
+        Alert.alert('Bag reached terminal', payload.notification?.body || 'Your bag has reached the terminal.');
+      }
     });
 
     return () => socket.disconnect();
@@ -315,6 +345,13 @@ const UserProfileScreen = ({ navigation, route }) => {
         : String(vehicleData.barcodeData);
     } catch { return bookingId || 'CITY-TERMINAL'; }
   };
+
+  const barcodePayload = parseBarcodePayload(vehicleData.barcodeData);
+  const isBoardingPass = vehicleData.reachedAirport ||
+    String(vehicleData.status || '').toLowerCase().includes('airport') ||
+    barcodePayload.type === 'digital_boarding_pass';
+  const barcodeTitle = isBoardingPass ? 'Digital Boarding Pass' : 'Baggage Receipt';
+  const bagStatus = barcodePayload.bagStatus || (isBoardingPass ? 'At terminal' : 'With driver');
 
   // ── Render ────────────────────────────────────────
   if (!bookingId) {
@@ -384,6 +421,8 @@ const UserProfileScreen = ({ navigation, route }) => {
               <Divider />
               <InfoRow label="Nationality"     value={passenger.nationality} />
               <Divider />
+              <InfoRow label="Date of Birth"   value={passenger.dateOfBirth} />
+              <Divider />
               <InfoRow label="Passport Number" value={passenger.passportNumber} />
             </Card>
 
@@ -444,9 +483,11 @@ const UserProfileScreen = ({ navigation, route }) => {
             {vehicleData.vehicleVerified && vehicleData.barcodeData ? (
               /* UNLOCKED — show barcode */
               <View style={styles.barcodeCard}>
-                <Text style={styles.barcodeTitle}>Luggage Tag Barcode</Text>
+                <Text style={styles.barcodeTitle}>{barcodeTitle}</Text>
                 <Text style={styles.barcodeDesc}>
-                  Driver verified your Vehicle ID.{'\n'}Show this at the airport counter.
+                  {isBoardingPass
+                    ? 'Airport has confirmed your bag. Use this same ID for luggage and boarding.'
+                    : 'Driver verified your Vehicle ID. This is your baggage receipt until airport confirmation.'}
                 </Text>
                 <View style={styles.qrWrapper}>
                   <QRCode
@@ -457,6 +498,13 @@ const UserProfileScreen = ({ navigation, route }) => {
                   />
                 </View>
                 <Text style={styles.qrCaption}>SCAN AT AIRPORT COUNTER</Text>
+                <View style={styles.boardingInfo}>
+                  <Text style={styles.boardingLine}>{passenger.name}</Text>
+                  <Text style={styles.boardingLine}>
+                    {barcodePayload.flightNumber || flight.flightNumber}  {barcodePayload.destination || flight.destination}
+                  </Text>
+                  <Text style={styles.boardingMuted}>Bag: {bagStatus}</Text>
+                </View>
                 {/* Driver info on barcode card */}
                 <View style={styles.barcodeDriverInfo}>
                   <Text style={styles.barcodeDriverText}>
@@ -605,6 +653,16 @@ const styles = StyleSheet.create({
     borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8,
   },
   barcodeDriverText: { color: '#08100A', fontSize: 13, fontWeight: '700' },
+  boardingInfo: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  boardingLine: { color: '#08100A', fontSize: 14, fontWeight: '900', textAlign: 'center' },
+  boardingMuted: { color: '#163A1C', fontSize: 12, fontWeight: '800', marginTop: 4 },
 
   // Barcode locked
   lockedCard: {

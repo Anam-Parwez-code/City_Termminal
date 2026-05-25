@@ -22,6 +22,49 @@ const demoSlots = () => {
 
 const getDemoSlot = (slotId) => demoSlots().find((slot) => Number(slot.id) === Number(slotId)) || null;
 
+const parseFlightDate = (value) => {
+  if (!value) return null;
+  let parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) && typeof value === 'string') {
+    const match = value.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i);
+    if (match) {
+      const [, dd, mm, yy, hh = '0', min = '0', meridian] = match;
+      const fullYear = yy.length === 2 ? `20${yy}` : yy;
+      let hour = Number(hh);
+      if (meridian?.toLowerCase() === 'pm' && hour < 12) hour += 12;
+      if (meridian?.toLowerCase() === 'am' && hour === 12) hour = 0;
+      parsed = new Date(Number(fullYear), Number(mm) - 1, Number(dd), hour, Number(min));
+    }
+  }
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const limitSlotsBeforeFlight = (slots, flightTime) => {
+  const departure = parseFlightDate(flightTime);
+  if (!departure) return slots;
+  return slots.filter((slot) => {
+    const slotTime = parseFlightDate(slot.slot_time);
+    return slotTime && slotTime <= departure;
+  });
+};
+
+const getFlightDepartureTime = async (bookingId) => {
+  if (!bookingId) return null;
+  try {
+    const result = await pool.query(
+      `SELECT departure_time
+       FROM bookings
+       WHERE UPPER(booking_id) = UPPER($1)
+       LIMIT 1`,
+      [bookingId]
+    );
+    const parsed = parseFlightDate(result.rows[0]?.departure_time);
+    return parsed ? parsed.toISOString() : null;
+  } catch (_err) {
+    return null;
+  }
+};
+
 const ensureSlotSupportTables = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS slot_bookings (
@@ -71,8 +114,9 @@ const ensureSlotSupportTables = async () => {
 
 const makePickupOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
-const getAvailableSlots = async (_req, res) => {
+const getAvailableSlots = async (req, res) => {
   try {
+    const flightTime = await getFlightDepartureTime(req.query?.bookingId);
     const result = await pool.query(
       `SELECT id, slot_time, location_name, location_address,
               COALESCE(total_capacity, 0) AS total_capacity,
@@ -81,22 +125,29 @@ const getAvailableSlots = async (_req, res) => {
               COALESCE(is_available, true) AS is_available
        FROM slots
        WHERE slot_time > NOW() - interval '6 hours'
+         AND ($1::timestamp IS NULL OR slot_time <= $1::timestamp)
          AND COALESCE(total_capacity, 0) > COALESCE(booked_count, 0)
          AND COALESCE(is_available, true) = true
        ORDER BY slot_time ASC
-       LIMIT 20`
+       LIMIT 20`,
+      [flightTime]
     );
+
+    const slots = result.rows.length > 0
+      ? result.rows
+      : limitSlotsBeforeFlight(demoSlots(), flightTime);
 
     return res.status(200).json({
       success: true,
-      slots: result.rows.length > 0 ? result.rows : demoSlots(),
+      slots,
     });
   } catch (error) {
     console.error('Get slots error:', error);
+    const flightTime = await getFlightDepartureTime(req.query?.bookingId);
     return res.status(200).json({
       success: true,
       demoMode: true,
-      slots: demoSlots(),
+      slots: limitSlotsBeforeFlight(demoSlots(), flightTime),
     });
   }
 };

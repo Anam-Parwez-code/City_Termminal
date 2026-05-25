@@ -23,11 +23,36 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 
-import apiService from '../services/apiService';
 import { useTranslation } from 'react-i18next';
 import theme from '../theme';
 
 const { width } = Dimensions.get('window');
+
+const pickFirst = (...values) =>
+  values.find((value) => value !== undefined && value !== null && String(value).trim()) || '';
+
+const getBookingPassengerName = (bookingData = {}) =>
+  pickFirst(
+    bookingData.passengerName,
+    bookingData.passenger_name,
+    bookingData.verifiedName,
+    bookingData.verified_name,
+    bookingData.name,
+    'Demo Passenger'
+  );
+
+const createDummyPassportData = (bookingData = {}, bookingId = '') => ({
+  name: getBookingPassengerName(bookingData),
+  passportNumber: pickFirst(
+    bookingData.passportNumber,
+    bookingData.passport_number,
+    `DUMMY${String(bookingId || '000000').slice(-6)}`
+  ),
+  dateOfBirth: pickFirst(bookingData.dateOfBirth, bookingData.date_of_birth, '1995-01-01'),
+  nationality: pickFirst(bookingData.nationality, 'Demo Nationality'),
+  confidence: 0.99,
+  mode: 'dummy',
+});
 
 const PassportScanScreen = ({ navigation, route }) => {
   const { t, i18n } = useTranslation();
@@ -126,17 +151,12 @@ const PassportScanScreen = ({ navigation, route }) => {
       // ── API CALL ──────────────────────────────────────────
       // Backend se response aata hai:
       // { success: true, data: { name, passportNumber, dateOfBirth, ... } }
-      const response = await apiService.verifyPassport({
-        imageBase64: capturedImage.base64,
-        bookingId: bookingId,
-      });
+      const dummyPassportData = createDummyPassportData(bookingData, bookingId);
 
       // ── BUG FIX 1: response.data pass karo, response nahi ─
       // Pehle: passportData: result  ← WRONG (pura response object)
       // Ab:    passportData: response.data ← CORRECT (sirf extracted data)
-      if (!response || !response.success) {
-        throw new Error(response?.message || 'Scan failed');
-      }
+      // Real OCR is preserved in apiService.verifyPassportReal for future use.
 
       // ── BUG FIX 2: Navigate karne se pehle state reset karo
       // Warna jab back aao toh loop shuru hoga
@@ -148,7 +168,7 @@ const PassportScanScreen = ({ navigation, route }) => {
         bookingData: bookingData,
         bookingId: bookingId,
         airline: airline,
-        passportData: response.data, // ← FIXED: .data add kiya
+        passportData: dummyPassportData,
         passportImage: capturedImage.uri,
       });
 

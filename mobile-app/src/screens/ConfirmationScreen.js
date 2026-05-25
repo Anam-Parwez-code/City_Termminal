@@ -51,6 +51,15 @@ const formatDate = (dateString) => {
   });
 };
 
+const pick = (...values) =>
+  values.find((value) => value != null && String(value).trim() !== '' && String(value).trim() !== '--');
+
+const pickupNameFrom = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  return pick(value.name, value.label, value.locationName, value.pickupLocation);
+};
+
 // ============================================================
 // INFO ROW COMPONENT — Reusable detail row
 // ============================================================
@@ -79,7 +88,32 @@ const ConfirmationScreen = ({ navigation, route }) => {
     airline,
     bookingData,
     confirmation, // Backend se aaya: { vehicleNumber, slotTime, locationName, qrCode }
-  } = route.params;
+  } = route.params || {};
+
+  const pickupLocation = pick(
+    confirmation?.locationName,
+    confirmation?.pickupLocation,
+    pickupNameFrom(route?.params?.pickupLocation),
+    route?.params?.pickupLocationName,
+  ) || '--';
+  const destinationTerminal = pick(
+    confirmation?.destinationTerminal,
+    route?.params?.destinationTerminal,
+    bookingData?.terminal,
+  ) || '--';
+  const slotTime = pick(
+    confirmation?.slotTime,
+    confirmation?.slot_time,
+    route?.params?.slotDetails?.slotTime,
+    route?.params?.selectedTimeSlot,
+  );
+  const vehicleNumber = pick(confirmation?.vehicleNumber, confirmation?.vehicleId, confirmation?.vehicle_id) || '--';
+  const boardingPassData = pick(
+    confirmation?.barcodeData,
+    confirmation?.barcode_data,
+    confirmation?.proof_qr_code,
+    confirmation?.qrCode,
+  );
 
   // QR Code ref — save ke liye
   const qrRef = useRef(null);
@@ -87,11 +121,12 @@ const ConfirmationScreen = ({ navigation, route }) => {
   // ── QR CODE DATA ─────────────────────────────────────────
   // Backend se aaya qrCode string
   // Isme sab details hain: bookingId, vehicle, time, location
-  const qrData = confirmation?.qrCode || JSON.stringify({
+  const qrData = boardingPassData || JSON.stringify({
     bookingId,
-    vehicle: confirmation?.vehicleNumber,
-    time: confirmation?.slotTime,
-    location: confirmation?.locationName,
+    vehicle: vehicleNumber,
+    time: slotTime,
+    location: pickupLocation,
+    destinationTerminal,
   });
 
   // ── SHARE HANDLER ────────────────────────────────────────
@@ -103,9 +138,9 @@ const ConfirmationScreen = ({ navigation, route }) => {
           `🏙️ City Terminal Booking Confirmed!\n\n` +
           `📋 Booking ID: ${bookingId}\n` +
           `✈️ Flight: ${bookingData?.flightNumber}\n` +
-          `📍 Pickup: ${confirmation?.locationName}\n` +
-          `🕐 Time: ${formatTime(confirmation?.slotTime)}\n` +
-          `🚗 Vehicle: ${confirmation?.vehicleNumber}\n\n` +
+          `📍 Pickup: ${pickupLocation}\n` +
+          `🕐 Time: ${formatTime(slotTime)}\n` +
+          `🚗 Vehicle: ${vehicleNumber}\n\n` +
           `Please show QR code at pickup point.`,
         title: t('confirmation.successTitle'),
       });
@@ -195,7 +230,7 @@ const ConfirmationScreen = ({ navigation, route }) => {
           <InfoRow
             icon="📍"
             label={t('confirmation.pickupLocation')}
-            value={confirmation?.locationName || '--'}
+            value={pickupLocation}
             highlight={true}
           />
 
@@ -204,7 +239,7 @@ const ConfirmationScreen = ({ navigation, route }) => {
           <InfoRow
             icon="🕐"
             label={t('confirmation.pickupTime')}
-            value={formatTime(confirmation?.slotTime)}
+            value={formatTime(slotTime)}
             highlight={true}
           />
 
@@ -213,7 +248,7 @@ const ConfirmationScreen = ({ navigation, route }) => {
           <InfoRow
             icon="📅"
             label={t('confirmation.date')}
-            value={formatDate(confirmation?.slotTime)}
+            value={formatDate(slotTime)}
           />
 
           <View style={styles.divider} />
@@ -221,7 +256,15 @@ const ConfirmationScreen = ({ navigation, route }) => {
           <InfoRow
             icon="🚗"
             label={t('confirmation.vehicleNumber')}
-            value={confirmation?.vehicleNumber || '--'}
+            value={vehicleNumber}
+          />
+
+          <View style={styles.divider} />
+
+          <InfoRow
+            icon="AIR"
+            label="Destination Terminal"
+            value={destinationTerminal}
           />
 
           <View style={styles.divider} />
@@ -292,7 +335,16 @@ const ConfirmationScreen = ({ navigation, route }) => {
     bookingId,
     airline,
     bookingData,
-    confirmation,
+    ...route?.params,
+    confirmation: {
+      ...(confirmation || {}),
+      vehicleNumber,
+      vehicleId: vehicleNumber,
+      locationName: pickupLocation,
+      pickupLocation,
+      destinationTerminal,
+      slotTime,
+    },
   })}
 >
   <Text style={styles.trackButtonText}>🚗 {t('confirmation.trackVehicle')}</Text>

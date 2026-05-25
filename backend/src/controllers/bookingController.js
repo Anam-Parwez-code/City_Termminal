@@ -23,6 +23,7 @@ const verifyBooking = async (req, res) => {
         b.passport_number,
         b.date_of_birth,
         b.nationality,
+        b.status AS booking_status,
         va.vehicle_id,
         va.driver_name,
         va.driver_phone,
@@ -47,6 +48,9 @@ const verifyBooking = async (req, res) => {
     }
 
     const row = result.rows[0];
+    const vehicleVerified =
+      row.vehicle_verified === true ||
+      ['at_airport', 'barcode_issued', 'en_route_airport'].includes(String(row.vehicle_status || '').toLowerCase());
 
     // Uniform Response for Frontend State
     return res.status(200).json({
@@ -69,11 +73,11 @@ const verifyBooking = async (req, res) => {
         vehicle_id: row.vehicle_id || null,
         driver_name: row.driver_name || null,
         driver_phone: row.driver_phone || null,
-        status: row.vehicle_status || 'Scheduled', 
+        status: row.vehicle_status || row.booking_status || 'Scheduled', 
         
         // 🔒 Barcode Lock/Unlock Flags
-        vehicle_verified: row.vehicle_verified === true || ['at_airport', 'barcode_issued'].includes(row.vehicle_status) || false,
-        barcode_data: row.barcode_data || row.booking_id // Fallback to Booking ID if data string is empty
+        vehicle_verified: vehicleVerified,
+        barcode_data: vehicleVerified ? (row.barcode_data || row.booking_id) : null
       },
     });
   } catch (error) {
@@ -115,12 +119,17 @@ const getBookingDetails = async (req, res) => {
         destination: row.destination || '-',
         airline_code: row.airline_code || '-',
         terminal: row.terminal || 'Terminal 1', // 🎯 Agar DB me null bhi hua, toh Terminal 1 fallback dega
+        passport_number: row.passport_number || null,
+        date_of_birth: row.date_of_birth || null,
+        nationality: row.nationality || null,
         vehicle_id: row.vehicle_id || null,
         driver_name: row.driver_name || null,
         driver_phone: row.driver_phone || null,
-        status: row.vehicle_status || 'dispatched',
-        vehicle_verified: row.vehicle_verified === true || String(row.vehicle_status).toLowerCase() === 'barcode_issued',
-        barcode_data: row.barcode_data || row.booking_id
+        status: row.vehicle_status || row.status || 'Scheduled',
+        vehicle_verified: row.vehicle_verified === true || ['barcode_issued', 'en_route_airport', 'at_airport'].includes(String(row.vehicle_status || '').toLowerCase()),
+        barcode_data: (row.vehicle_verified === true || ['barcode_issued', 'en_route_airport', 'at_airport'].includes(String(row.vehicle_status || '').toLowerCase()))
+          ? (row.barcode_data || row.booking_id)
+          : null
       }
     });
 

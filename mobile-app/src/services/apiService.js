@@ -172,8 +172,10 @@ const apiService = {
   // ── SCREEN 6: GET AVAILABLE SLOTS ────────────────────
   // GET /api/slots/available
   // BUG FIX: Yeh function missing tha — ab add kiya!
-  getAvailableSlots: async () => {
-    const result = await api.get('/slots/available');
+  getAvailableSlots: async ({ bookingId } = {}) => {
+    const result = await api.get('/slots/available', {
+      params: bookingId ? { bookingId } : {},
+    });
     return result;
     // Returns: { success: true, slots: [...] }
   },

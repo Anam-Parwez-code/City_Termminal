@@ -52,6 +52,13 @@ const BarcodeScreen = ({ navigation, route }) => {
   const driverDisplayPhone =
     confirmation.driverPhone || confirmation.driver_phone || parsedPayload.driverPhone || status?.driverPhone || '—';
 
+  const isBoardingPass =
+    parsedPayload.type === 'digital_boarding_pass' ||
+    status?.reachedAirport === true ||
+    String(status?.status || '').toLowerCase().includes('airport');
+  const cardTitle = isBoardingPass ? 'Digital Boarding Pass' : 'Baggage Receipt';
+  const bagStatus = parsedPayload.bagStatus || (isBoardingPass ? 'At terminal' : 'With driver');
+
   const barcodeValue =
     confirmation.barcodeData ||
     confirmation.barcode_data ||
@@ -112,7 +119,7 @@ const BarcodeScreen = ({ navigation, route }) => {
           <Text style={styles.backText}>{isRTL ? '→' : '←'}</Text>
         </TouchableOpacity>
         <View style={styles.headerCopy}>
-          <Text style={[styles.eyebrow, isRTL && styles.textRight]}>Luggage barcode</Text>
+          <Text style={[styles.eyebrow, isRTL && styles.textRight]}>{cardTitle}</Text>
           <Text style={[styles.title, isRTL && styles.textRight]}>Synced with Operations</Text>
         </View>
       </View>
@@ -131,7 +138,10 @@ const BarcodeScreen = ({ navigation, route }) => {
 
       <View style={styles.qrCard}>
         <QRCode value={String(barcodeValue)} size={230} backgroundColor="#FFFFFF" color="#0A0A0B" />
-        <Text style={styles.qrCaption}>Admin dashboard barcode payload embedded</Text>
+        <Text style={styles.qrCaption}>
+          {parsedPayload.flightNumber || 'Flight pending'} {parsedPayload.destination || ''}
+        </Text>
+        <Text style={styles.qrCaption}>Bag: {bagStatus}</Text>
       </View>
 
       <View style={styles.instructions}>

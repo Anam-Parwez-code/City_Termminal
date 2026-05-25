@@ -12,7 +12,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Alert,
   Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -84,6 +83,27 @@ const normalizeStatus = (value) => {
 const stageForStatus = (status) =>
   STAGES.find((stage) => stage.key === normalizeStatus(status)) || STAGES[0];
 
+const pick = (...values) =>
+  values.find((value) => value != null && String(value).trim() !== '' && String(value).trim() !== 'â€”');
+
+const pickupNameFrom = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  return pick(value.name, value.label, value.locationName, value.pickupLocation);
+};
+
+const coordsFrom = (...values) => {
+  for (const value of values) {
+    if (!value || typeof value !== 'object') continue;
+    const lat = value.lat ?? value.latitude;
+    const lng = value.lng ?? value.longitude;
+    if (lat != null && lng != null && Number.isFinite(+lat) && Number.isFinite(+lng)) {
+      return { lat: +lat, lng: +lng };
+    }
+  }
+  return null;
+};
+
 // ── ETA seconds se mm:ss format ──────────────────────────
 const formatETA = (totalSeconds) => {
   if (totalSeconds <= 0) return '0:00';
@@ -100,7 +120,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
   const bookingId   = params.bookingId || params.bookingData?.bookingId || params.bookingData?.booking_id;
   const confirmation = params.confirmation || {};
 
-  const [statusData,   setStatusData]   = useState(null);
+  const [statusData,   setStatusData]   = useState(params.statusData || null);
   const [driverCoords, setDriverCoords] = useState(null);
 
   // ── Real countdown timer state ────────────────────────
@@ -120,26 +140,27 @@ const LiveTrackingScreen = ({ navigation, route }) => {
   );
 
   const pickupLocation =
-    statusData?.pickupLocation ||
-    statusData?.pickup_location ||
-    confirmation.locationName ||
-    params?.pickupLocation?.name ||
-    'Pickup';
+    pick(
+      statusData?.pickupLocation,
+      statusData?.pickup_location,
+      confirmation.pickupLocation,
+      confirmation.locationName,
+      pickupNameFrom(params?.pickupLocation),
+      params?.pickupLocationName,
+    ) || 'Pickup';
 
   const destinationTerminal =
-    statusData?.destinationTerminal ||
-    statusData?.destination_terminal ||
-    confirmation.destinationTerminal ||
-    params?.destinationTerminal ||
-    'DXB';
+    pick(
+      statusData?.destinationTerminal,
+      statusData?.destination_terminal,
+      confirmation.destinationTerminal,
+      params?.destinationTerminal,
+      params?.bookingData?.terminal,
+    ) || 'DXB';
 
   const pickupCoords = useMemo(() => {
-    const pl = params.pickupLocation || {};
-    if (pl.lat != null && pl.lng != null && Number.isFinite(+pl.lat) && Number.isFinite(+pl.lng)) {
-      return { lat: +pl.lat, lng: +pl.lng };
-    }
-    return null;
-  }, [params.pickupLocation]);
+    return coordsFrom(params.pickupLocation, confirmation.pickupCoordinates, statusData?.pickupCoordinates);
+  }, [confirmation.pickupCoordinates, params.pickupLocation, statusData?.pickupCoordinates]);
 
   const pickupForMap   = pickupCoords || null;
 
@@ -147,6 +168,12 @@ const LiveTrackingScreen = ({ navigation, route }) => {
     driverCoords ||
     (statusData?.driverLat != null && statusData?.driverLng != null
       ? { lat: Number(statusData.driverLat), lng: Number(statusData.driverLng) }
+      : null) ||
+    (pickupCoords
+      ? {
+          lat: pickupCoords.lat + (0.018 * (1 - currentStage.progress)),
+          lng: pickupCoords.lng + (0.014 * (1 - currentStage.progress)),
+        }
       : null);
 
   const validDriverCoords =
@@ -161,6 +188,20 @@ const LiveTrackingScreen = ({ navigation, route }) => {
   const isAtPickup    = currentStage.key === 'arrived_pickup';
   const isBarcodeStage = normalizeStatus(statusData?.status) === 'barcode_issued';
   const isAtAirport   = currentStage.key === 'at_airport';
+  const slotTime = pick(
+    statusData?.slotTime,
+    statusData?.slot_time,
+    confirmation.slotTime,
+    params?.slotDetails?.slotTime,
+    params?.selectedTimeSlot,
+  );
+  const barcodeData = pick(
+    statusData?.barcodeData,
+    statusData?.barcode_data,
+    confirmation.barcodeData,
+    confirmation.barcode_data,
+    confirmation.qrCode,
+  );
 
   // ── ETA countdown start/reset karo ───────────────────
   // Jab bhi stage change ho ya server se etaMinutes aaye, timer reset ho
@@ -292,6 +333,10 @@ const LiveTrackingScreen = ({ navigation, route }) => {
             vehicle_id:       payload.vehicle_id       || payload.vehicleId        || payload.vehicle_number || prev?.vehicle_id,
             driverName:       payload.driverName       || payload.driver_name      || payload.driver || prev?.driverName,
             driverPhone:      payload.driverPhone      || payload.driver_phone     || prev?.driverPhone,
+            pickupLocation:   payload.pickupLocation   || payload.pickup_location  || prev?.pickupLocation,
+            pickup_location:  payload.pickup_location  || payload.pickupLocation   || prev?.pickup_location,
+            destinationTerminal: payload.destinationTerminal || payload.destination_terminal || prev?.destinationTerminal,
+            destination_terminal: payload.destination_terminal || payload.destinationTerminal || prev?.destination_terminal,
           }));
           fetchStatus();
         });
@@ -305,25 +350,29 @@ const LiveTrackingScreen = ({ navigation, route }) => {
     };
   }, [bookingId, startCountdown]);
 
-  // ── Airport arrival alert ─────────────────────────────
+  // ── Boarding pass / airport handoff ───────────────────
   useEffect(() => {
-    if (!isAtAirport || arrivedPing.current) return;
+    if ((!isBarcodeStage && !isAtAirport) || arrivedPing.current) return;
     arrivedPing.current = true;
-    Alert.alert(
-      Platform.OS === 'web' ? 'Arrived — Airport' : 'Arrived at airport',
-      'Driver has reached the terminal. Your baggage team will offload shortly.',
-      [{
-        text: 'OK',
-        onPress: () =>
-          navigation.replace('Arrived', {
-            ...params,
-            statusData,
-            confirmation: { ...confirmation, vehicleId, vehicleNumber: vehicleId },
-          }),
-      }],
-      { cancelable: true },
-    );
-  }, [confirmation, isAtAirport, navigation, params, statusData, vehicleId]);
+    navigation.replace('Confirmation', {
+      ...params,
+      bookingId,
+      statusData,
+      confirmation: {
+        ...confirmation,
+        ...(statusData || {}),
+        vehicleId,
+        vehicleNumber: vehicleId,
+        locationName: pickupLocation,
+        pickupLocation,
+        destinationTerminal,
+        slotTime,
+        barcodeData,
+        barcode_data: barcodeData,
+        qrCode: barcodeData || confirmation.qrCode,
+      },
+    });
+  }, [barcodeData, bookingId, confirmation, destinationTerminal, isAtAirport, isBarcodeStage, navigation, params, pickupLocation, slotTime, statusData, vehicleId]);
 
   // ── ETA display ───────────────────────────────────────
   // etaSeconds null = still loading initial stage
@@ -448,6 +497,8 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <Text style={styles.detailValue}>{pickupLocation}</Text>
           <Text style={styles.detailLabel}>Destination</Text>
           <Text style={styles.detailValue}>{destinationTerminal}</Text>
+          <Text style={styles.detailLabel}>Pickup Time</Text>
+          <Text style={styles.detailValue}>{slotTime || '--'}</Text>
         </View>
 
         {normalizeStatus(statusData?.status) === 'dispatched' && (
