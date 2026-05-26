@@ -11,17 +11,20 @@ export async function loadDriverSession() {
     AsyncStorage.getItem(KEYS.VEHICLE_ID),
   ]);
   return {
-    bookingId: bookingId || '',
-    vehicleId: vehicleId || '',
+   bookingId: (bookingId && bookingId.trim() !== '') ? bookingId : null,
+    vehicleId: (vehicleId && vehicleId.trim() !== '') ? vehicleId : null,
   };
 }
 
-export async function saveDriverSession(bookingId, vehicleId) {
+export async function saveDriverSession(driverId) {
+  await AsyncStorage.setItem(KEYS.DRIVER_ID, String(driverId || '').trim());
+}
+/*export async function saveDriverSession(bookingId, vehicleId) {
   await AsyncStorage.multiSet([
     [KEYS.BOOKING_ID, String(bookingId || '').trim()],
     [KEYS.VEHICLE_ID, String(vehicleId || '').trim()],
   ]);
-}
+}*/
 
 export async function clearDriverSession() {
   await AsyncStorage.multiRemove([KEYS.BOOKING_ID, KEYS.VEHICLE_ID]);

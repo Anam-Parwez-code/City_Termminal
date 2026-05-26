@@ -13,6 +13,8 @@ import {
   TouchableOpacity,
   View,
   Platform,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { io } from 'socket.io-client';
@@ -22,14 +24,14 @@ import apiService, { getSocketBaseUrl } from '../services/apiService';
 const { height } = Dimensions.get('window');
 
 const COLORS = {
-  bg:        '#0A0A0B',
-  map:       '#15171B',
-  card:      '#191C20',
-  line:      '#2A2F36',
+  bg:        '#F8FAF8',
+  map:       '#E8F5EA',
+  card:      '#FFFFFF',
+  line:      '#E5E7EB',
   green:     '#47D361',
   greenDark: '#163A1C',
-  text:      '#FFFFFF',
-  muted:     '#A7B0C0',
+  text:      '#111111',
+  muted:     '#6B7280',
 };
 
 const STAGES = [
@@ -122,6 +124,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
   const [statusData,   setStatusData]   = useState(params.statusData || null);
   const [driverCoords, setDriverCoords] = useState(null);
+  const [pushNotify,   setPushNotify]   = useState({ visible: false, title: '', body: '' });
 
   // ── Real countdown timer state ────────────────────────
   // etaSeconds = total seconds bache hain (e.g. 18 min = 1080 seconds)
@@ -321,6 +324,35 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           const pb = String(payload.bookingId || payload.booking_id || '').toUpperCase();
           const my = String(bookingId || '').toUpperCase();
           if (pb && pb !== my) return;
+
+          const n = payload.notification;
+          const statusStr = String(payload.status || '').toLowerCase();
+          if (n?.title || n?.body) {
+            setPushNotify({
+              visible: true,
+              title: n.title || 'Trip update',
+              body: n.body || payload.status || '',
+            });
+          } else if (statusStr.includes('en route') && statusStr.includes('pickup')) {
+            setPushNotify({
+              visible: true,
+              title: 'Driver en route',
+              body: 'Your driver is on the way to pickup.',
+            });
+          } else if (statusStr.includes('pickup') && (statusStr.includes('arrived') || statusStr.includes('at pickup'))) {
+            setPushNotify({
+              visible: true,
+              title: 'Driver at pickup',
+              body: 'Your driver has arrived at the pickup point.',
+            });
+          } else if (statusStr.includes('airport')) {
+            setPushNotify({
+              visible: true,
+              title: 'Airport update',
+              body: payload.status || 'Van status updated for airport leg.',
+            });
+          }
+
           setStatusData((prev) => ({
             ...(prev || {}),
             status:           payload.status           || prev?.status,
@@ -386,6 +418,29 @@ const LiveTrackingScreen = ({ navigation, route }) => {
 
   return (
     <View style={styles.container}>
+      <Modal
+        visible={pushNotify.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPushNotify((n) => ({ ...n, visible: false }))}
+      >
+        <Pressable
+          style={styles.notifyBackdrop}
+          onPress={() => setPushNotify((n) => ({ ...n, visible: false }))}
+        >
+          <View style={styles.notifyCard}>
+            <Text style={styles.notifyTitle}>{pushNotify.title}</Text>
+            <Text style={styles.notifyBody}>{pushNotify.body}</Text>
+            <TouchableOpacity
+              style={styles.notifyBtn}
+              onPress={() => setPushNotify((n) => ({ ...n, visible: false }))}
+            >
+              <Text style={styles.notifyBtnTxt}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
       <View style={styles.mapContainer}>
         <TripMap
           pickup={pickupForMap}
@@ -665,10 +720,33 @@ const styles = StyleSheet.create({
 
   flowHint: {
     marginTop: 12, padding: 14, borderRadius: 14,
-    backgroundColor: '#101215',
+    backgroundColor: COLORS.card,
     borderWidth: 1, borderColor: COLORS.line,
     color: COLORS.muted, fontSize: 13, lineHeight: 19, fontWeight: '700',
   },
+  notifyBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    padding: 28,
+  },
+  notifyCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    padding: 22,
+    borderWidth: 2,
+    borderColor: COLORS.green,
+  },
+  notifyTitle: { color: COLORS.text, fontSize: 18, fontWeight: '900' },
+  notifyBody: { color: COLORS.muted, marginTop: 8, lineHeight: 20 },
+  notifyBtn: {
+    marginTop: 16,
+    backgroundColor: COLORS.green,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  notifyBtnTxt: { color: COLORS.greenDark, fontWeight: '900' },
 });
 
 export default LiveTrackingScreen;

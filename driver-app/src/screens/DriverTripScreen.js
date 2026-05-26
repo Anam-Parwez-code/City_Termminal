@@ -24,6 +24,7 @@ export default function DriverTripScreen({ navigation }) {
   const [log, setLog] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [incomingAssignment, setIncomingAssignment] = useState(null);
+  const [completedActions, setCompletedActions] = useState({});
   const watchRef = useRef(null);
 
   const append = useCallback((line) => {
@@ -34,12 +35,28 @@ export default function DriverTripScreen({ navigation }) {
 
   useEffect(() => {
     socket.emit('join_dispatch');
+    socket.on('vehicle_update', (payload = {}) => {
+      const assignedVehicle = payload.vehicleId || payload.vehicle_id || payload.vehicle_number;
+      const myVehicle = vehicleId.trim();
+      if (myVehicle && assignedVehicle && String(assignedVehicle).toUpperCase() !== myVehicle.toUpperCase()) return;
+      const nextBookingId = payload.bookingId || payload.booking_id;
+      if (!nextBookingId) return;
+      const nextAssignment = {
+        bookingId: String(nextBookingId).toUpperCase(),
+        passengerName: payload.passengerName || payload.passenger_name || payload.flight?.passengerName || 'Passenger',
+        pickup: payload.pickupLocation || payload.pickup_location || payload.current_location || 'Pickup',
+        destination: payload.destinationTerminal || payload.destination_terminal || payload.flight?.terminal || 'Terminal',
+      };
+      setIncomingAssignment(nextAssignment);
+      Alert.alert('New booking assigned', `${nextAssignment.bookingId} is ready for pickup.`);
+    });
     return () => socket.disconnect();
-  }, [socket]);
+  }, [socket, vehicleId]);
 
   useEffect(() => {
-    loadDriverSession().then(({ bookingId: b }) => {
+    loadDriverSession().then(({ bookingId: b, vehicleId: v }) => {
       if (b) setBookingId(b);
+      if (v) setVehicleId(v);
     });
   }, []);
 
@@ -52,10 +69,18 @@ export default function DriverTripScreen({ navigation }) {
 
   const requireIds = () => {
     if (!bookingId.trim() || !vehicleId.trim()) {
-      Alert.alert('Required', 'Enter Booking ID and Vehicle ID first.');
+      Alert.alert('Required', 'Enter Booking ID first. Vehicle ID comes from driver login.');
       return false;
     }
     return true;
+  };
+
+  const actionDone = (key) => completedActions[key] === true;
+
+  const markActionDone = (key, message) => {
+    setCompletedActions((prev) => ({ ...prev, [key]: true }));
+    append(message);
+    Alert.alert('Updated', message);
   };
 
   const ensureLocationAllowed = async () => {
@@ -109,7 +134,7 @@ export default function DriverTripScreen({ navigation }) {
         bookingId: bookingId.trim(),
         vehicleId: vehicleId.trim(),
       });
-      append('Marked: driving to passenger pickup');
+      markActionDone('enRoutePickup', 'Marked: driving to passenger pickup.');
       socket.emit('status_update', {
         bookingId: bookingId.trim(),
         booking_id: bookingId.trim(),
@@ -131,7 +156,7 @@ export default function DriverTripScreen({ navigation }) {
         bookingId: bookingId.trim(),
         vehicleId: vehicleId.trim(),
       });
-      append('Marked: arrived at pickup — passenger can verify Vehicle ID');
+      markActionDone('atPickup', 'Marked: arrived at pickup. Passenger can verify Vehicle ID.');
       socket.emit('status_update', {
         bookingId: bookingId.trim(),
         booking_id: bookingId.trim(),
@@ -163,6 +188,7 @@ export default function DriverTripScreen({ navigation }) {
         vehicleId: vehicleId.trim(),
       });
       append('Passenger verified! Barcode generated.');
+      setCompletedActions((prev) => ({ ...prev, verifyPassenger: true }));
       socket.emit('status_update', {
         bookingId: bookingId.trim(),
         booking_id: bookingId.trim(),
@@ -214,8 +240,7 @@ export default function DriverTripScreen({ navigation }) {
         barcodeData: result?.status?.barcodeData || result?.status?.barcode_data,
         updated_at: new Date().toISOString(),
       });
-      append('Marked heading to airport ✓');
-      Alert.alert('Airport trip', 'Passenger tracking updates to airport leg.');
+      markActionDone('airportTrip', 'Marked: heading to airport. Passenger tracking updated.');
     } catch (err) {
       append(`Airport trip: ${apiErrorMessage(err)}`);
       Alert.alert('Airport trip failed', apiErrorMessage(err));
@@ -234,8 +259,7 @@ export default function DriverTripScreen({ navigation }) {
         status: 'Arrived — At Airport',
         updated_at: new Date().toISOString(),
       });
-      append('Terminal arrival broadcast ✓');
-      Alert.alert('Arrived', 'Admin + passenger see landed status.');
+      markActionDone('airportDone', 'Terminal arrival broadcast sent. Passenger boarding pass updated.');
     } catch (err) {
       append(`Arrival: ${apiErrorMessage(err)}`);
       Alert.alert('Arrival failed', apiErrorMessage(err));
@@ -315,47 +339,61 @@ export default function DriverTripScreen({ navigation }) {
         </TouchableOpacity>
 
         <Text style={styles.note}>
-          Enter the passenger Booking ID and your roster Vehicle ID. If the
-          passenger has not confirmed pickup yet, the server will still link this van to the booking when possible.
+          Enter the passenger Booking ID. Your roster Vehicle ID is loaded from login and used automatically.
         </Text>
 
         <Text style={styles.label}>Booking ID</Text>
         <TextInput
-          placeholder="EK123456789"
+          placeholder="Passenger booking ID, e.g. DXB8888"
+          placeholderTextColor="#6B7280"
           value={bookingId}
-          onChangeText={setBookingId}
+          onChangeText={(value) => {
+            setBookingId(value);
+            setCompletedActions({});
+          }}
           autoCapitalize="characters"
           style={styles.input}
         />
 
-        <Text style={styles.label}>Vehicle ID</Text>
-        <TextInput
-          placeholder="Enter vehicle ID"
-          value={vehicleId}
-          onChangeText={setVehicleId}
-          autoCapitalize="characters"
-          style={styles.input}
-        />
+       {/* <Text style={styles.label}>Vehicle ID</Text>
+        <View style={styles.vehiclePillBox}>
+          <Text style={styles.vehiclePillValue}>{vehicleId || 'Login vehicle missing'}</Text>
+        </View>*/}
 
-        <TouchableOpacity style={styles.btn} onPress={markEnRoutePickup}>
-          <Text style={styles.btnTxt}>1 · En route to passenger pickup</Text>
+        <TouchableOpacity
+          style={[styles.btn, actionDone('enRoutePickup') && styles.btnDone]}
+          onPress={markEnRoutePickup}
+          disabled={actionDone('enRoutePickup')}
+        >
+          <Text style={styles.btnTxt}>{actionDone('enRoutePickup') ? 'Done: En route to pickup' : '1 - En route to passenger pickup'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btn} onPress={markAtPickup}>
-          <Text style={styles.btnTxt}>2 · Arrived at pickup</Text>
+        <TouchableOpacity
+          style={[styles.btn, actionDone('atPickup') && styles.btnDone]}
+          onPress={markAtPickup}
+          disabled={actionDone('atPickup')}
+        >
+          <Text style={styles.btnTxt}>{actionDone('atPickup') ? 'Done: Arrived at pickup' : '2 - Arrived at pickup'}</Text>
         </TouchableOpacity>
 
         <View style={styles.otpCard}>
           <Text style={styles.label}>Passenger OTP (Their Vehicle ID)</Text>
           <TextInput
-            placeholder="Ask passenger for OTP"
+            placeholder={`Passenger OTP / Vehicle ID (${vehicleId || 'CT-102'})`}
+            placeholderTextColor="#6B7280"
             value={passengerOtp}
             onChangeText={setPassengerOtp}
             autoCapitalize="characters"
             style={styles.input}
           />
-          <TouchableOpacity style={[styles.btn, { backgroundColor: '#eab308' }]} onPress={verifyPassengerOTP}>
-            <Text style={[styles.btnTxt, { color: '#000' }]}>3 · Verify Passenger (OTP step)</Text>
+          <TouchableOpacity
+            style={[styles.btn, styles.btnOtp, actionDone('verifyPassenger') && styles.btnDone]}
+            onPress={verifyPassengerOTP}
+            disabled={actionDone('verifyPassenger')}
+          >
+            <Text style={[styles.btnTxt, { color: '#000' }]}>
+              {actionDone('verifyPassenger') ? 'Done: Passenger verified' : '3 - Verify Passenger (OTP step)'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -367,12 +405,20 @@ export default function DriverTripScreen({ navigation }) {
           <Text style={styles.btnTxtMuted}>Pause GPS watcher</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btn} onPress={startAirportTrip}>
-          <Text style={styles.btnTxt}>Announce “heading to airport”</Text>
+        <TouchableOpacity
+          style={[styles.btn, actionDone('airportTrip') && styles.btnDone]}
+          onPress={startAirportTrip}
+          disabled={actionDone('airportTrip')}
+        >
+          <Text style={styles.btnTxt}>{actionDone('airportTrip') ? 'Done: Heading to airport' : 'Announce heading to airport'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btnAirport} onPress={markAirportDone}>
-          <Text style={styles.btnTxt}>Mark landed at terminal</Text>
+        <TouchableOpacity
+          style={[styles.btnAirport, actionDone('airportDone') && styles.btnDone]}
+          onPress={markAirportDone}
+          disabled={actionDone('airportDone')}
+        >
+          <Text style={styles.btnTxt}>{actionDone('airportDone') ? 'Done: Terminal reached' : 'Mark landed at terminal'}</Text>
         </TouchableOpacity>
 
         <Text style={styles.log}>{log || 'Telemetry log shows here …'}</Text>
@@ -383,7 +429,7 @@ export default function DriverTripScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  outer: { flex: 1, backgroundColor: '#060708' },
+  outer: { flex: 1, backgroundColor: '#FFFFFF' },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -392,24 +438,24 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'android' ? 10 : 6,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#111827',
-    backgroundColor: '#060708',
+    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   hamCircle: {
     width: 46,
     height: 46,
     borderRadius: 14,
-    backgroundColor: '#0f1216',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#1f2937',
+    borderColor: '#E5E7EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   hamCirclePlaceholder: { width: 46, height: 46 },
-  hamLines: { color: '#f9fafb', fontSize: 22, fontWeight: '700' },
+  hamLines: { color: '#111827', fontSize: 22, fontWeight: '700' },
   topTitles: { alignItems: 'center', flex: 1 },
   brandEyebrow: { color: '#47d361', fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
-  brandTitle: { color: '#fff', fontSize: 17, fontWeight: '900', marginTop: 2 },
+  brandTitle: { color: '#111827', fontSize: 17, fontWeight: '900', marginTop: 2 },
   menuBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -418,12 +464,12 @@ const styles = StyleSheet.create({
   menuSheet: {
     width: '78%',
     maxWidth: 320,
-    backgroundColor: '#0a0c10',
+    backgroundColor: '#FFFFFF',
     paddingTop: Platform.OS === 'android' ? 48 : 56,
     paddingHorizontal: 20,
     paddingBottom: 28,
     borderRightWidth: 1,
-    borderColor: '#1f2937',
+    borderColor: '#E5E7EB',
   },
   menuBrand: { color: '#9ca3af', fontWeight: '900', fontSize: 12, letterSpacing: 2, marginBottom: 24 },
   menuRow: {
@@ -435,7 +481,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#1f2937',
   },
   menuRowIcon: { color: '#47d361', fontSize: 18 },
-  menuRowTitle: { color: '#fff', fontSize: 17, fontWeight: '900' },
+  menuRowTitle: { color: '#111827', fontSize: 17, fontWeight: '900' },
   menuRowSub: { color: '#6b7280', fontSize: 12, marginTop: 4, maxWidth: 220 },
   menuClose: {
     marginTop: 28,
@@ -448,26 +494,28 @@ const styles = StyleSheet.create({
   menuCloseTxt: { color: '#d1d5db', fontWeight: '800' },
   root: { flex: 1 },
   content: { padding: 22, paddingTop: 16, gap: 6, paddingBottom: 40 },
-  note: { color: '#9ca3af', fontSize: 13, marginBottom: 18, lineHeight: 19 },
-  label: { color: '#d1d5db', fontWeight: '700', marginTop: 12, marginBottom: 6 },
+  note: { color: '#6B7280', fontSize: 13, marginBottom: 18, lineHeight: 19 },
+  label: { color: '#111827', fontWeight: '800', marginTop: 12, marginBottom: 6 },
   input: {
-    backgroundColor: '#111827',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#E5E7EB',
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === 'ios' ? 14 : 10,
-    color: '#fff',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '600',
   },
   btn: { backgroundColor: '#47d361', borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 18 },
+  btnDone: { opacity: 0.58 },
+  btnOtp: { backgroundColor: '#eab308' },
   btnTxt: { fontWeight: '900', fontSize: 15, color: '#08110a' },
   btnMuted: {
     marginTop: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#D1D5DB',
     padding: 14,
     alignItems: 'center',
   },
@@ -475,17 +523,25 @@ const styles = StyleSheet.create({
   btnAirport: { backgroundColor: '#163a1c', borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 14 },
   log: {
     marginTop: 26,
-    color: '#9ca3af',
+    color: '#6B7280',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 11,
     lineHeight: 16,
   },
   footer: { marginTop: 16, fontSize: 11, color: '#6b7280' },
+  vehiclePillBox: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    padding: 16,
+  },
+  vehiclePillValue: { color: '#111827', fontSize: 20, fontWeight: '900', letterSpacing: 1.5 },
   assignmentBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 24 },
-  assignmentCard: { backgroundColor: '#111827', padding: 24, borderRadius: 24, borderWidth: 1, borderColor: '#374151' },
+  assignmentCard: { backgroundColor: '#FFFFFF', padding: 24, borderRadius: 24, borderWidth: 1, borderColor: '#E5E7EB' },
   assignmentEyebrow: { color: '#47d361', fontWeight: '900', fontSize: 12, textTransform: 'uppercase', marginBottom: 8 },
-  assignmentTitle: { color: '#fff', fontSize: 24, fontWeight: '900', marginBottom: 16 },
-  assignmentLocation: { color: '#d1d5db', fontSize: 15, fontWeight: '600', marginBottom: 8 },
+  assignmentTitle: { color: '#111827', fontSize: 24, fontWeight: '900', marginBottom: 16 },
+  assignmentLocation: { color: '#374151', fontSize: 15, fontWeight: '600', marginBottom: 8 },
   assignmentActions: { flexDirection: 'row', gap: 12, marginTop: 24 },
   declineBtn: { flex: 1, paddingVertical: 16, borderRadius: 14, borderWidth: 1, borderColor: '#ef4444', alignItems: 'center' },
   declineTxt: { color: '#ef4444', fontWeight: '900', fontSize: 16 },
@@ -493,5 +549,5 @@ const styles = StyleSheet.create({
   acceptTxt: { color: '#08100a', fontWeight: '900', fontSize: 16 },
   demoBtn: { backgroundColor: '#1f2937', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
   demoBtnTxt: { color: '#9ca3af', fontWeight: '800' },
-  otpCard: { backgroundColor: '#111827', padding: 16, borderRadius: 16, marginTop: 18, borderWidth: 1, borderColor: '#eab308' },
-});
+  otpCard: { backgroundColor: '#FEFCE8', padding: 16, borderRadius: 16, marginTop: 18, borderWidth: 1, borderColor: '#eab308' },
+}); 

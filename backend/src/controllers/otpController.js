@@ -9,6 +9,7 @@ const DRIVERS = [
 
 const STATUS_LABELS = {
   dispatched:       'Dispatched',
+  driver_assigned:  'Driver Assigned',
   en_route:         'En Route',
   arrived_pickup:   'Arrived at Pickup',
   barcode_issued:   'Barcode Issued',
@@ -38,13 +39,13 @@ const fetchFlightBlock = async (bookingId) => {
   try {
     const res = await pool.query(
       `SELECT
-         COALESCE(passenger_name, full_name, name)        AS passenger_name,
-         COALESCE(passenger_phone, phone, mobile)         AS passenger_phone,
-         COALESCE(flight_number, flight_no, flight)       AS flight_number,
-         COALESCE(departure_time, flight_time, dep_time)  AS departure_time,
-         COALESCE(destination, destination_airport, dest) AS destination,
-         COALESCE(airline, airline_code, carrier)         AS airline,
-         COALESCE(terminal, destination_terminal)         AS terminal
+         passenger_name,
+         passenger_phone,
+         flight_number,
+         departure_time,
+         destination,
+         airline_code AS airline,
+         terminal
        FROM bookings
        WHERE UPPER(TRIM(booking_id)) = UPPER(TRIM($1))
        LIMIT 1`,
@@ -177,7 +178,14 @@ const emitTripUpdate = (req, payload) => {
   if (!io) return;
   const bookingKey = payload.bookingId || payload.booking_id;
   if (bookingKey) io.to(`booking:${bookingKey}`).emit('status_update', payload);
+  io.to('dispatch').emit('status_update', payload);
   io.to('dispatch').emit('vehicle_update', payload);
+};
+
+const emitNewBooking = (req, payload) => {
+  const io = req.app?.get?.('io');
+  if (!io) return;
+  io.to('dispatch').emit('new_booking', payload);
 };
 
 // ---------------------------------------------------------------------------
@@ -399,7 +407,20 @@ const assignVehicle = async (req, res) => {
           current_location: refreshed.current_location,
           map_x: map.x, map_y: map.y, updated_at: new Date().toISOString(),
         });
-        const flight = await fetchFlightBlock(bookingId);
+        const flightSync = await fetchFlightBlock(bookingId);
+        emitNewBooking(req, {
+          bookingId,
+          booking_id: bookingId,
+          passengerName: flightSync?.passengerName || 'Passenger',
+          pickupAddress: pickupLocation,
+          pickup: pickupLocation,
+          destination: destinationTerminal,
+          flightTime: flightSync?.departureTime || null,
+          flightNumber: flightSync?.flightNumber || null,
+          vehicleId: refreshed.vehicle_id,
+          status: 'dispatched',
+        });
+        const flight = flightSync;
         return res.status(200).json({
           success: true, message: 'Pickup synced with driver van',
           assignment: toClientStatus(refreshed, resolveEffectiveStatus(refreshed), flight),
@@ -474,6 +495,19 @@ const assignVehicle = async (req, res) => {
       map_x: map.x, map_y: map.y, updated_at: new Date().toISOString(),
     });
     const flight = await fetchFlightBlock(bookingId);
+    emitNewBooking(req, {
+      bookingId,
+      booking_id: bookingId,
+      passengerName: flight?.passengerName || 'Passenger',
+      pickupAddress: pickupLocation,
+      pickup: pickupLocation,
+      destination: destinationTerminal,
+      flightTime: flight?.departureTime || null,
+      flightNumber: flight?.flightNumber || null,
+      vehicleId,
+      status: 'dispatched',
+      createdAt: new Date().toISOString(),
+    });
     return res.status(200).json({
       success: true, message: 'Vehicle assigned',
       assignment: toClientStatus(inserted, undefined, flight),
@@ -755,7 +789,12 @@ const startAirportTrip = async (req, res) => {
       vehicle_number: loc.vehicle_id, vehicleId: loc.vehicle_id,
       driver_name: loc.driver_name, driver: loc.driver_name,
       passengers: 1, status: 'En route to Airport',
-      current_location: loc.current_location, updated_at: new Date().toISOString(),
+      current_location: loc.current_location,
+      notification: {
+        title: 'Heading to airport',
+        body: 'Your luggage van is en route to the airport.',
+      },
+      updated_at: new Date().toISOString(),
     });
 
     const flight = await fetchFlightBlock(bookingId);
@@ -933,6 +972,10 @@ const markEnRoutePickup = async (req, res) => {
       vehicle_number: assignment.vehicle_id, vehicleId: assignment.vehicle_id,
       status: 'En route to pickup',
       current_location: result.rows[0]?.current_location,
+      notification: {
+        title: 'Driver en route',
+        body: 'Your driver is on the way to your pickup location.',
+      },
       updated_at: new Date().toISOString(),
     });
     return res.status(200).json({ success: true, status: toClientStatus(row || result.rows[0], 'en_route') });
@@ -1002,6 +1045,133 @@ const markAtPickup = async (req, res) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// GET /api/otp/pending/:vehicleId — driver dashboard
+// ---------------------------------------------------------------------------
+const listPendingBookings = async (req, res) => {
+  try {
+    const vehicleId = String(req.params?.vehicleId || '').trim();
+    if (!vehicleId) {
+      return res.status(400).json({ success: false, message: 'vehicleId required' });
+    }
+    await ensureVehicleTables();
+    const result = await pool.query(
+      `SELECT va.booking_id, va.vehicle_id, va.driver_name, va.status,
+              va.pickup_location, va.destination_terminal, va.updated_at,
+              COALESCE(b.passenger_name, 'Passenger') AS passenger_name,
+              COALESCE(b.departure_time, b.flight_time) AS departure_time,
+              COALESCE(b.flight_number, '') AS flight_number,
+              COALESCE(va.pickup_location, b.destination, 'Pickup pending') AS pickup_address
+       FROM vehicle_assignments va
+       LEFT JOIN bookings b ON UPPER(b.booking_id) = UPPER(va.booking_id)
+       WHERE va.status IN ('dispatched', 'driver_assigned', 'en_route')
+         AND (
+           UPPER(TRIM(va.vehicle_id)) = UPPER(TRIM($1))
+           OR va.status = 'dispatched'
+         )
+       ORDER BY va.updated_at DESC
+       LIMIT 30`,
+      [vehicleId]
+    );
+    const bookings = result.rows.map((row) => ({
+      bookingId: row.booking_id,
+      passengerName: row.passenger_name,
+      pickupAddress: row.pickup_address || row.pickup_location,
+      destination: row.destination_terminal,
+      flightTime: row.departure_time,
+      flightNumber: row.flight_number,
+      status: row.status,
+      vehicleId: row.vehicle_id,
+    }));
+    return res.status(200).json({ success: true, bookings });
+  } catch (error) {
+    console.error('listPendingBookings error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/otp/accept-booking — driver accepts assignment
+// ---------------------------------------------------------------------------
+const acceptBooking = async (req, res) => {
+  try {
+    const { bookingId, vehicleId } = req.body || {};
+    if (!bookingId || !vehicleId) {
+      return res.status(400).json({ success: false, message: 'bookingId and vehicleId are required' });
+    }
+    await ensureVehicleTables();
+    let assignment = await getAssignmentByBookingId(bookingId);
+    if (!assignment) {
+      assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, vehicleId.trim());
+    }
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    const driverRes = await pool.query(
+      `SELECT * FROM drivers
+       WHERE UPPER(TRIM(COALESCE(vehicle_id::text,''))) = UPPER(TRIM($1::text))
+       LIMIT 1`,
+      [vehicleId]
+    );
+    const driver = driverRes.rows[0];
+    if (!driver) {
+      return res.status(400).json({ success: false, message: 'Vehicle ID not registered in drivers table' });
+    }
+
+    const vid = driver.vehicle_id || vehicleId;
+    const result = await pool.query(
+      `UPDATE vehicle_assignments
+       SET vehicle_id=$1, driver_name=$2, driver_phone=$3,
+           status='driver_assigned',
+           current_location=$4, updated_at=NOW()
+       WHERE UPPER(booking_id)=UPPER($5)
+       RETURNING *`,
+      [
+        vid,
+        driver.name,
+        driver.phone,
+        `Driver ${driver.name} accepted — en route soon`,
+        bookingId,
+      ]
+    );
+    try {
+      await pool.query(`UPDATE drivers SET is_available=false WHERE vehicle_id=$1`, [vid]);
+    } catch (_e) {}
+
+    const row = result.rows[0] || assignment;
+    const flight = await fetchFlightBlock(bookingId);
+    const payload = {
+      bookingId,
+      booking_id: bookingId,
+      vehicleId: vid,
+      vehicle_number: vid,
+      driver_name: driver.name,
+      status: 'driver_assigned',
+      statusLabel: 'Driver Assigned',
+      passengerName: flight?.passengerName,
+      pickupAddress: row.pickup_location,
+      flightTime: flight?.departureTime,
+      updated_at: new Date().toISOString(),
+      notification: {
+        title: 'Driver assigned',
+        body: 'Your driver has accepted the booking and will head to pickup soon.',
+      },
+    };
+    emitTripUpdate(req, payload);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Booking accepted — status driver_assigned',
+      assignment: toClientStatus(row, 'driver_assigned', flight),
+      flight,
+    });
+  } catch (error) {
+    console.error('acceptBooking error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Backward-compat alias
 const getStatus = getOTPStatus;
 
@@ -1015,4 +1185,6 @@ module.exports = {
   reachedAirport,
   getOTPStatus,
   getStatus,
+  listPendingBookings,
+  acceptBooking,
 };

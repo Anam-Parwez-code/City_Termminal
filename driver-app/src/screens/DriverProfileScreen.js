@@ -15,13 +15,13 @@ import { fetchTripStatus, apiErrorMessage } from '../api/driverClient';
 import { loadDriverSession, clearDriverSession } from '../sessionStorage';
 
 const COLORS = {
-  bg: '#060708',
-  card: '#0f1216',
-  line: '#1f2937',
+  bg: '#F8FAF8',
+  card: '#FFFFFF',
+  line: '#E5E7EB',
   green: '#47d361',
   greenBg: '#163a1c',
-  text: '#f9fafb',
-  muted: '#9ca3af',
+  text: '#111111',
+  muted: '#6b7280',
 };
 
 export default function DriverProfileScreen({ navigation }) {
@@ -86,7 +86,7 @@ export default function DriverProfileScreen({ navigation }) {
         style: 'destructive',
         onPress: async () => {
           await clearDriverSession();
-          navigation.reset({ index: 0, routes: [{ name: 'Trip' }] });
+          navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
         },
       },
     ]);
@@ -206,14 +206,14 @@ const styles = StyleSheet.create({
   sub: { color: COLORS.muted, fontSize: 14, lineHeight: 21, marginTop: 10, marginBottom: 8 },
   loader: { paddingVertical: 24 },
   errBox: {
-    backgroundColor: '#1c1418',
+    backgroundColor: '#FEF2F2',
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#422026',
+    borderColor: '#FECACA',
     marginBottom: 16,
   },
-  errTitle: { color: '#fecaca', fontWeight: '900', marginBottom: 6 },
+  errTitle: { color: '#DC2626', fontWeight: '900', marginBottom: 6 },
   errBody: { color: COLORS.muted, fontSize: 13, lineHeight: 19 },
   retryBtn: {
     marginTop: 12,
@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
   },
   payloadLabel: { color: COLORS.muted, fontSize: 11, fontWeight: '800', marginBottom: 8 },
   payloadMono: {
-    color: '#d1d5db',
+    color: '#111827',
     fontSize: 11,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     lineHeight: 16,
@@ -271,9 +271,9 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     paddingHorizontal: 20,
     borderRadius: 16,
-    backgroundColor: '#111827',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#E5E7EB',
     alignItems: 'center',
   },
   logoutTxt: { color: '#fca5a5', fontWeight: '900', fontSize: 17 },

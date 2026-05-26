@@ -32,4 +32,19 @@ export async function verifyPassengerVehicle({ bookingId, vehicleId }) {
   return data;
 }
 
+export async function fetchPendingBookings(vehicleId) {
+  const id = String(vehicleId || '').trim();
+  if (!id) throw new Error('Vehicle ID missing');
+  const { data } = await client.get(`/otp/pending/${encodeURIComponent(id)}`);
+  return data?.bookings || [];
+}
+
+export async function acceptBooking({ bookingId, vehicleId }) {
+  const { data } = await client.post('/otp/accept-booking', {
+    bookingId: String(bookingId || '').trim(),
+    vehicleId: String(vehicleId || '').trim(),
+  });
+  return data;
+}
+
 export default client;

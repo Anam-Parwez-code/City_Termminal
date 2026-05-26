@@ -39,8 +39,25 @@ const AuthScreen = ({ navigation }) => {
   const [driverId,    setDriverId]    = useState('');
   const [isAvailable, setIsAvailable] = useState(true);
   const [loading,     setLoading]     = useState(false);
+  const [emailError,  setEmailError]  = useState('');
 
   const T = (en, ar) => isRTL ? ar : en;
+
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const validateEmail = (value) => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) {
+      setEmailError(T('Email is required', 'البريد الإلكتروني مطلوب'));
+      return false;
+    }
+    if (!EMAIL_REGEX.test(trimmed)) {
+      setEmailError(T('Enter a valid email address', 'أدخل بريداً إلكترونياً صالحاً'));
+      return false;
+    }
+    setEmailError('');
+    return true;
+  };
 
   // ── ROUTING LOGIC — Fixed ────────────────────────────────
   // Sirf tab UserProfile pe jao jab barcode generate hua ho
@@ -74,11 +91,14 @@ const AuthScreen = ({ navigation }) => {
       return;
     }
 
-    if (!email.trim() || !password.trim()) {
+    if (!password.trim()) {
       Alert.alert(
         T('Required', 'مطلوب'),
-        T('Please enter email and password.', 'يرجى إدخال البريد الإلكتروني وكلمة المرور.')
+        T('Please enter your password.', 'يرجى إدخال كلمة المرور.')
       );
+      return;
+    }
+    if (!validateEmail(email)) {
       return;
     }
 
@@ -200,15 +220,27 @@ const AuthScreen = ({ navigation }) => {
                 />
               )}
               <TextInput
-                style={[styles.input, isRTL && styles.inputRTL]}
+                style={[
+                  styles.input,
+                  isRTL && styles.inputRTL,
+                  emailError ? styles.inputError : null,
+                ]}
                 placeholder={T('Email', 'البريد الإلكتروني')}
                 placeholderTextColor={theme.colors.muted}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(v) => {
+                  setEmail(v);
+                  if (emailError) validateEmail(v);
+                }}
+                onBlur={() => email.trim() && validateEmail(email)}
                 textAlign={isRTL ? 'right' : 'left'}
               />
+              {emailError ? (
+                <Text style={[styles.fieldError, isRTL && styles.textRight]}>{emailError}</Text>
+              ) : null}
               <TextInput
                 style={[styles.input, isRTL && styles.inputRTL]}
                 placeholder={T('Password', 'كلمة المرور')}
@@ -258,6 +290,8 @@ const styles = StyleSheet.create({
   switchTxtActive: { color: theme.colors.white },
   input: { backgroundColor: theme.colors.white, borderRadius: 14, color: theme.colors.black, marginBottom: 12, paddingHorizontal: 16, paddingVertical: 15, fontSize: theme.fontSizes.md, fontWeight: '700' },
   inputRTL:     { textAlign: 'right' },
+  inputError:   { borderWidth: 1, borderColor: theme.colors.danger },
+  fieldError:   { color: theme.colors.danger, fontSize: theme.fontSizes.sm, fontWeight: '700', marginTop: -6, marginBottom: 10 },
   availRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4 },
   availTxt:     { flex: 1, color: theme.colors.black, fontWeight: '700' },
   submitButton: { backgroundColor: theme.colors.careemGreen, borderRadius: theme.radii.button, paddingVertical: 18, marginTop: 6, alignItems: 'center' },
