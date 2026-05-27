@@ -26,8 +26,9 @@ const DriverLoginScreen = ({ navigation }) => {
   const [emailError, setEmailError] = useState('');
 
   useEffect(() => {
-    loadDriverSession().then(({ vehicleId }) => {
-      if (vehicleId) setDriverId(vehicleId);
+    loadDriverSession().then(({ driverId, vehicleId }) => {
+      const savedId = driverId || vehicleId;
+      if (savedId) setDriverId(savedId);
     });
   }, []);
 
@@ -62,8 +63,7 @@ const DriverLoginScreen = ({ navigation }) => {
 
     setLoading(true);
     try {
-      // Vehicle ID abhi khali bhej rahe hain
-     await saveDriverSession(driverId.trim().toUpperCase());
+      await saveDriverSession('', driverId.trim().toUpperCase(), '');
       navigation.replace('Trip');
       
     } catch (_error) {

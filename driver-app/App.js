@@ -25,7 +25,7 @@ export default function App() {
  // }).catch((err) => {
     //console.error("Session load error:", err);
    // setBoot('Login');
-   if (session && session.vehicleId) {
+   if (session && (session.driverId || session.vehicleId)) {
         setBoot('Trip');
       } else {
         setBoot('Login');

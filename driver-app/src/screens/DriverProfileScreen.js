@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,9 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import QRCode from 'react-native-qrcode-svg';
-import { fetchTripStatus, apiErrorMessage } from '../api/driverClient';
+import { io } from 'socket.io-client';
+import { fetchTripStatus, fetchBookingDetails, apiErrorMessage } from '../api/driverClient';
+import { SOCKET_OPTIONS, socketOrigin } from '../config';
 import { loadDriverSession, clearDriverSession } from '../sessionStorage';
 
 const COLORS = {
@@ -26,16 +28,20 @@ const COLORS = {
 
 export default function DriverProfileScreen({ navigation }) {
   const [bookingId, setBookingId] = useState('');
+  const [driverId, setDriverId] = useState('');
   const [vehicleId, setVehicleId] = useState('');
   const [statusPayload, setStatusPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const socket = useMemo(() => io(socketOrigin, SOCKET_OPTIONS), []);
 
   const refresh = useCallback(async () => {
     const sess = await loadDriverSession();
-    const bid = sess.bookingId.trim();
-    const vid = sess.vehicleId.trim();
+    const bid = String(sess.bookingId || '').trim();
+    const did = String(sess.driverId || sess.vehicleId || '').trim();
+    const vid = String(sess.vehicleId || '').trim();
     setBookingId(bid);
+    setDriverId(did);
     setVehicleId(vid);
     setError('');
     if (!bid) {
@@ -46,7 +52,35 @@ export default function DriverProfileScreen({ navigation }) {
     setLoading(true);
     try {
       const data = await fetchTripStatus(bid);
-      setStatusPayload(data.status || null);
+      const next = data.status || null;
+      let merged = next || null;
+      try {
+        const bookingRes = await fetchBookingDetails(bid);
+        const bookingData = bookingRes?.bookingData || bookingRes?.booking || null;
+        if (bookingData) {
+          merged = {
+            ...(merged || {}),
+            passengerName: bookingData.passenger_name || bookingData.passengerName || merged?.passengerName,
+            passenger_name: bookingData.passenger_name || bookingData.passengerName || merged?.passenger_name,
+            destination: bookingData.destination || merged?.destination,
+            destinationTerminal: bookingData.terminal || bookingData.destination_terminal || merged?.destinationTerminal,
+            flight: {
+              ...(merged?.flight || {}),
+              passengerName: bookingData.passenger_name || bookingData.passengerName || merged?.flight?.passengerName,
+              flightNumber: bookingData.flight_number || bookingData.flightNumber || merged?.flight?.flightNumber,
+              destination: bookingData.destination || merged?.flight?.destination,
+              airline: bookingData.airline_code || bookingData.airlineCode || merged?.flight?.airline,
+              terminal: bookingData.terminal || merged?.flight?.terminal,
+            },
+          };
+        }
+      } catch (_detailsErr) {
+        // keep base OTP status payload
+      }
+      setStatusPayload(merged);
+      if (!did && next?.driverId) {
+        setDriverId(String(next.driverId).toUpperCase());
+      }
     } catch (e) {
       setStatusPayload(null);
       setError(apiErrorMessage(e));
@@ -61,16 +95,91 @@ export default function DriverProfileScreen({ navigation }) {
     }, [refresh]),
   );
 
+  useEffect(() => {
+    if (!bookingId) return undefined;
+    socket.emit('join_booking', { bookingId });
+    socket.emit('join_dispatch');
+
+    const handleStatus = (payload = {}) => {
+      const payloadBookingId = payload.bookingId || payload.booking_id;
+      const payloadVehicleId = payload.vehicleId || payload.vehicle_id || payload.vehicle_number;
+      const bookingMatches = payloadBookingId && String(payloadBookingId).toUpperCase() === String(bookingId).toUpperCase();
+      const vehicleMatches = vehicleId && payloadVehicleId && String(payloadVehicleId).toUpperCase() === String(vehicleId).toUpperCase();
+      if (!bookingMatches && !vehicleMatches) return;
+
+      setStatusPayload((prev) => ({
+        ...(prev || {}),
+        ...payload,
+        bookingId: payloadBookingId || prev?.bookingId || bookingId,
+        vehicleId: payloadVehicleId || prev?.vehicleId || vehicleId,
+        status: payload.statusLabel || payload.status || prev?.status,
+        pickupLocation: payload.pickupAddress || payload.pickupLocation || payload.pickup_location || prev?.pickupLocation,
+        destinationTerminal: payload.destination || payload.destinationTerminal || payload.destination_terminal || prev?.destinationTerminal,
+        pickupTime: payload.pickupTime || payload.pickup_time || payload.flightTime || payload.departureTime || prev?.pickupTime,
+        passengerName: payload.passengerName || payload.passenger_name || payload.flight?.passengerName || prev?.passengerName,
+        driverId: payload.driverId || payload.driver_id || prev?.driverId,
+      }));
+    };
+
+    socket.on('status_update', handleStatus);
+    socket.on('vehicle_update', handleStatus);
+    return () => {
+      socket.emit('leave_booking', { bookingId });
+      socket.emit('leave_dispatch');
+      socket.off('status_update', handleStatus);
+      socket.off('vehicle_update', handleStatus);
+    };
+  }, [bookingId, socket, vehicleId]);
+
+  useEffect(() => () => socket.disconnect(), [socket]);
+
   const driverName = statusPayload?.driverName || statusPayload?.driver_name || '—';
+  const barcodePayload = useMemo(() => {
+    const raw = statusPayload?.barcodeData || statusPayload?.barcode_data;
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    try {
+      return JSON.parse(String(raw));
+    } catch (_e) {
+      return null;
+    }
+  }, [statusPayload?.barcodeData, statusPayload?.barcode_data]);
+
+  const userName =
+    statusPayload?.passengerName ||
+    statusPayload?.passenger_name ||
+    statusPayload?.flight?.passengerName ||
+    statusPayload?.flight?.passenger_name ||
+    barcodePayload?.passengerName ||
+    barcodePayload?.passenger_name ||
+    '—';
+  const resolvedDriverId =
+    driverId ||
+    statusPayload?.driverId ||
+    statusPayload?.driver_id ||
+    barcodePayload?.driverId ||
+    barcodePayload?.driver_id ||
+    '—';
   const driverPhone = statusPayload?.driverPhone || statusPayload?.driver_phone || '—';
   const tripPhase = statusPayload?.statusLabel || statusPayload?.status || '—';
+  const pickupLocation = statusPayload?.pickupLocation || statusPayload?.pickup_location || statusPayload?.pickupAddress || '—';
+  const destinationTerminal = statusPayload?.destinationTerminal || statusPayload?.destination_terminal || statusPayload?.destination || '—';
+  const pickupTime =
+    statusPayload?.pickupTime ||
+    statusPayload?.pickup_time ||
+    statusPayload?.flightTime ||
+    statusPayload?.departureTime ||
+    statusPayload?.departure_time ||
+    '—';
   const barcodeRaw =
     statusPayload?.barcodeData ||
     statusPayload?.barcode_data ||
-    (bookingId && vehicleId
+    (bookingId && (vehicleId || resolvedDriverId)
       ? JSON.stringify({
           bookingId,
-          vehicleId,
+          vehicleId: vehicleId || null,
+          driverId: resolvedDriverId !== '—' ? resolvedDriverId : null,
+          passengerName: userName !== '—' ? userName : null,
           driverName,
           driverPhone,
           role: 'driver_profile_fallback',
@@ -129,10 +238,20 @@ export default function DriverProfileScreen({ navigation }) {
 
         <View style={styles.card}>
           <Row label="Booking ID" value={bookingId || 'Not saved — enter on Trip console'} />
+          <Row label="Driver ID" value={resolvedDriverId} />
           <Row label="Vehicle ID" value={vehicleId || '—'} />
+          <Row label="User name" value={userName} />
           <Row label="Driver name" value={driverName} />
           <Row label="Driver phone" value={driverPhone} emphasis />
-          <Row label="Trip phase" value={tripPhase} />
+          <View style={styles.badgeRow}>
+            <Text style={styles.rowLabel}>Status Badge</Text>
+            <View style={styles.statusBadge}>
+              <Text style={styles.statusBadgeText}>{tripPhase}</Text>
+            </View>
+          </View>
+          <Row label="Pickup location" value={pickupLocation} />
+          <Row label="Destination" value={destinationTerminal} />
+          <Row label="Pickup time" value={pickupTime} />
         </View>
 
         <Text style={styles.sectionTitle}>Luggage barcode (QR)</Text>
@@ -239,6 +358,17 @@ const styles = StyleSheet.create({
   rowLabel: { color: COLORS.muted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
   rowValue: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
   rowEmphasis: { color: COLORS.green, fontSize: 17, fontWeight: '900' },
+  badgeRow: { gap: 8 },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.greenBg,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+  },
+  statusBadgeText: { color: COLORS.green, fontSize: 12, fontWeight: '900' },
   sectionTitle: { color: COLORS.text, fontSize: 18, fontWeight: '900', marginTop: 28 },
   sectionHint: { color: COLORS.muted, fontSize: 13, marginTop: 6, lineHeight: 19 },
   qrWrap: {

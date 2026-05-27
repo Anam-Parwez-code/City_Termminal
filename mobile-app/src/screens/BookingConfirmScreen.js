@@ -121,6 +121,7 @@ const BookingConfirmScreen = ({ navigation, route }) => {
             pickupLocation: pName,
             destinationTerminal: term,
             pickupCoordinates: pickupCoordsFrom(params.pickupLocation),
+            pickupTime: sTime,
           });
           const a = assignRes?.assignment || assignRes?.status || {};
           setVehicleId(a.vehicleId || a.vehicle_id || st.vehicleId || st.vehicle_id);
@@ -132,7 +133,13 @@ const BookingConfirmScreen = ({ navigation, route }) => {
         }
       } else if (pName !== '--' && term !== '--') {
         setAssigning(true);
-        const assignRes = await apiService.assignVehicle({ bookingId, pickupLocation: pName, destinationTerminal: term, pickupCoordinates: pickupCoordsFrom(params.pickupLocation) });
+        const assignRes = await apiService.assignVehicle({
+          bookingId,
+          pickupLocation: pName,
+          destinationTerminal: term,
+          pickupCoordinates: pickupCoordsFrom(params.pickupLocation),
+          pickupTime: sTime,
+        });
         const a = assignRes?.assignment || assignRes?.status || {};
         setVehicleId(a.vehicleId || a.vehicle_id);
         setDriverName(a.driverName || a.driver_name);

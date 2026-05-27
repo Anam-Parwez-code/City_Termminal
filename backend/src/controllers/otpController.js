@@ -31,6 +31,43 @@ const pick = (...values) =>
 const normalizeVehicleId = (id) =>
   String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+const driverIdAlias = (driverId) => String(driverId || '').toUpperCase().replace(/^DRV/, 'DR');
+const asPreferredDriverId = (driverId) => {
+  const raw = String(driverId || '').trim().toUpperCase();
+  if (!raw) return null;
+  return raw.startsWith('DRV-') ? raw.replace(/^DRV-/, 'DR-') : raw;
+};
+
+const driverIdFromVehicle = (vehicleId) => {
+  const match = DRIVERS.find((d) => normalizeVehicleId(d.vehicle_id) === normalizeVehicleId(vehicleId));
+  return asPreferredDriverId(match?.driver_id) || null;
+};
+
+const resolveVehicleIdInput = async (input) => {
+  const raw = String(input || '').trim();
+  if (!raw) return raw;
+  const normalized = normalizeVehicleId(raw);
+
+  const builtIn = DRIVERS.find((driver) =>
+    normalizeVehicleId(driver.vehicle_id) === normalized ||
+    normalizeVehicleId(driver.driver_id) === normalized ||
+    normalizeVehicleId(driverIdAlias(driver.driver_id)) === normalized
+  );
+  if (builtIn?.vehicle_id) return builtIn.vehicle_id;
+
+  try {
+    const result = await pool.query(`SELECT driver_id, vehicle_id FROM drivers`);
+    const row = result.rows.find((driver) =>
+      normalizeVehicleId(driver.vehicle_id) === normalized ||
+      normalizeVehicleId(driver.driver_id) === normalized ||
+      normalizeVehicleId(driverIdAlias(driver.driver_id)) === normalized
+    );
+    return row?.vehicle_id || raw;
+  } catch (_e) {
+    return raw;
+  }
+};
+
 // ---------------------------------------------------------------------------
 // fetchFlightBlock — joins bookings table, degrades gracefully if missing
 // ---------------------------------------------------------------------------
@@ -39,13 +76,13 @@ const fetchFlightBlock = async (bookingId) => {
   try {
     const res = await pool.query(
       `SELECT
-         passenger_name,
-         passenger_phone,
-         flight_number,
-         departure_time,
-         destination,
-         airline_code AS airline,
-         terminal
+         COALESCE(passenger_name, full_name, name) AS passenger_name,
+         COALESCE(passenger_phone, phone, mobile) AS passenger_phone,
+         COALESCE(flight_number, flight_no, flight) AS flight_number,
+         COALESCE(departure_time, flight_time, dep_time) AS departure_time,
+         COALESCE(destination, destination_airport, dest) AS destination,
+         COALESCE(airline_code, airline, carrier) AS airline,
+         COALESCE(terminal, destination_terminal) AS terminal
        FROM bookings
        WHERE UPPER(TRIM(booking_id)) = UPPER(TRIM($1))
        LIMIT 1`,
@@ -85,6 +122,7 @@ const ensureVehicleTables = async () => {
       current_location VARCHAR(100),
       pickup_location VARCHAR(100),
       destination_terminal VARCHAR(50),
+      pickup_time VARCHAR(80),
       reached_pickup BOOLEAN DEFAULT false,
       reached_airport BOOLEAN DEFAULT false,
       luggage_tagged BOOLEAN DEFAULT false,
@@ -108,6 +146,7 @@ const ensureVehicleTables = async () => {
   await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS driver_phone VARCHAR(20)`);
   await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS barcode_scanned BOOLEAN DEFAULT false`);
   await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS luggage_tagged BOOLEAN DEFAULT false`);
+  await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS pickup_time VARCHAR(80)`);
 
   for (const driver of DRIVERS) {
     await pool.query(
@@ -195,9 +234,16 @@ const getAssignmentByBookingId = async (bookingId) => {
   const result = await pool.query(
     `SELECT va.*,
             dr.current_lat AS driver_live_lat,
-            dr.current_lng AS driver_live_lng
+            dr.current_lng AS driver_live_lng,
+            COALESCE(
+              va.pickup_time,
+              s.slot_time::text,
+              CASE WHEN sb.qr_code LIKE '{%' THEN sb.qr_code::json->>'time' ELSE NULL END
+            ) AS pickup_time
      FROM vehicle_assignments va
      LEFT JOIN drivers dr ON dr.vehicle_id = va.vehicle_id
+     LEFT JOIN slot_bookings sb ON UPPER(sb.booking_id) = UPPER(va.booking_id)
+     LEFT JOIN slots s ON s.id = sb.slot_id
      WHERE UPPER(va.booking_id) = UPPER($1)
      ORDER BY va.created_at DESC
      LIMIT 1`,
@@ -255,6 +301,8 @@ const toClientStatus = (row, statusOverride, flight = null) => {
     vehicleId:       row.vehicle_id,
     driverName:      row.driver_name,
     driverPhone:     row.driver_phone,
+    driverId:        asPreferredDriverId(row.driver_id) || driverIdFromVehicle(row.vehicle_id),
+    passengerName:   flight?.passengerName || null,
     // ★ barcodeData must be non-null when vehicleVerified=true
     barcodeData:     row.barcode_data || null,
     // ★ vehicleVerified as explicit JS boolean — passenger app reads this
@@ -266,6 +314,7 @@ const toClientStatus = (row, statusOverride, flight = null) => {
     currentLocation: row.current_location,
     pickupLocation:  row.pickup_location,
     destinationTerminal: row.destination_terminal,
+    pickupTime:      row.pickup_time || null,
     reachedPickup:   row.reached_pickup  === true,
     reachedAirport:  row.reached_airport === true,
     driverLat:       row.driver_live_lat != null ? Number(row.driver_live_lat) : null,
@@ -297,18 +346,19 @@ const ensureAssignmentFromRegisteredVehicle = async (bookingId, vehicleId) => {
   let assignment = await getAssignmentByBookingId(bookingId);
   if (assignment) return assignment;
   if (!vehicleId || !String(vehicleId).trim()) return null;
+  const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
 
   await ensureVehicleTables();
   const driverRes = await pool.query(
     `SELECT * FROM drivers
      WHERE UPPER(TRIM(COALESCE(vehicle_id::text,''))) = UPPER(TRIM($1::text))
      LIMIT 1`,
-    [vehicleId]
+    [resolvedVehicleId]
   );
   const driver = driverRes.rows[0];
   if (!driver) return null;
 
-  const vid = driver.vehicle_id || vehicleId;
+  const vid = driver.vehicle_id || resolvedVehicleId;
   const barcodeData = JSON.stringify({
     bookingId, vehicleId: vid,
     driverName: driver.name, driverPhone: driver.phone,
@@ -326,7 +376,7 @@ const ensureAssignmentFromRegisteredVehicle = async (bookingId, vehicleId) => {
   return getAssignmentByBookingId(bookingId);
 };
 
-const makeFallbackAssignment = ({ bookingId, pickupLocation, destinationTerminal, pickupCoordinates }) => {
+const makeFallbackAssignment = ({ bookingId, pickupLocation, destinationTerminal, pickupCoordinates, pickupTime }) => {
   const driver = DRIVERS[Math.floor(Math.random() * DRIVERS.length)];
   return {
     id: `fallback-${bookingId}`,
@@ -347,6 +397,7 @@ const makeFallbackAssignment = ({ bookingId, pickupLocation, destinationTerminal
     current_location: `Driver dispatched to ${pickupLocation}`,
     pickup_location: pickupLocation,
     destination_terminal: destinationTerminal,
+    pickup_time: pickupTime || null,
     reached_pickup: false,
     reached_airport: false,
     created_at: new Date(),
@@ -361,7 +412,7 @@ const makeFallbackAssignment = ({ bookingId, pickupLocation, destinationTerminal
 // POST /api/otp/assign
 const assignVehicle = async (req, res) => {
   try {
-    const { bookingId, pickupLocation, destinationTerminal, pickupCoordinates } = req.body;
+    const { bookingId, pickupLocation, destinationTerminal, pickupCoordinates, pickupTime } = req.body;
     if (!bookingId || !pickupLocation || !destinationTerminal) {
       return res.status(400).json({
         success: false,
@@ -376,16 +427,16 @@ const assignVehicle = async (req, res) => {
         const barcodePayload = JSON.stringify({
           bookingId, vehicleId: existing.vehicle_id,
           driverName: existing.driver_name, driverPhone: existing.driver_phone,
-          pickupLocation, destinationTerminal,
+          pickupLocation, destinationTerminal, pickupTime: pickupTime || null,
           pickupCoordinates: pickupCoordinates || null,
           timestamp: new Date().toISOString(),
         });
         await pool.query(
           `UPDATE vehicle_assignments
            SET pickup_location=$1, destination_terminal=$2,
-               barcode_data=$3, current_location=$4, updated_at=NOW()
-           WHERE id=$5`,
-          [pickupLocation, destinationTerminal, barcodePayload,
+               pickup_time=$3, barcode_data=$4, current_location=$5, updated_at=NOW()
+           WHERE id=$6`,
+          [pickupLocation, destinationTerminal, pickupTime || null, barcodePayload,
            `Driver dispatched to ${pickupLocation}`, existing.id]
         );
         const refreshed = await getAssignmentByBookingId(bookingId);
@@ -415,6 +466,7 @@ const assignVehicle = async (req, res) => {
           pickupAddress: pickupLocation,
           pickup: pickupLocation,
           destination: destinationTerminal,
+          pickupTime: pickupTime || null,
           flightTime: flightSync?.departureTime || null,
           flightNumber: flightSync?.flightNumber || null,
           vehicleId: refreshed.vehicle_id,
@@ -433,6 +485,7 @@ const assignVehicle = async (req, res) => {
         driverPhone: existing.driver_phone,
         pickupLocation,
         destinationTerminal,
+        pickupTime: pickupTime || null,
         pickupCoordinates: pickupCoordinates || null,
         timestamp: new Date().toISOString(),
       });
@@ -440,13 +493,15 @@ const assignVehicle = async (req, res) => {
         `UPDATE vehicle_assignments
          SET pickup_location=$1,
              destination_terminal=$2,
-             barcode_data=$3,
-             current_location=$4,
+             pickup_time=$3,
+             barcode_data=$4,
+             current_location=$5,
              updated_at=NOW()
-         WHERE id=$5`,
+         WHERE id=$6`,
         [
           pickupLocation,
           destinationTerminal,
+          pickupTime || null,
           barcodePayload,
           `Driver dispatched to ${pickupLocation}`,
           existing.id,
@@ -464,14 +519,15 @@ const assignVehicle = async (req, res) => {
     const vehicleId = driver.vehicle_id || `CT-${Math.floor(Math.random() * 99) + 101}`;
     const barcodeData = JSON.stringify({
       bookingId, vehicleId, pickupLocation, destinationTerminal,
+      pickupTime: pickupTime || null,
       pickupCoordinates: pickupCoordinates || null, timestamp: new Date().toISOString(),
     });
     const result = await pool.query(
       `INSERT INTO vehicle_assignments
-         (booking_id,vehicle_id,driver_name,driver_phone,barcode_data,status,current_location,pickup_location,destination_terminal)
-       VALUES ($1,$2,$3,$4,$5,'dispatched',$6,$7,$8) RETURNING *`,
+         (booking_id,vehicle_id,driver_name,driver_phone,barcode_data,status,current_location,pickup_location,destination_terminal,pickup_time)
+       VALUES ($1,$2,$3,$4,$5,'dispatched',$6,$7,$8,$9) RETURNING *`,
       [bookingId, vehicleId, driver.name, driver.phone, barcodeData,
-       `Driver dispatched to ${pickupLocation}`, pickupLocation, destinationTerminal]
+       `Driver dispatched to ${pickupLocation}`, pickupLocation, destinationTerminal, pickupTime || null]
     );
     await pool.query(`UPDATE drivers SET is_available=false WHERE vehicle_id=$1`, [vehicleId]);
 
@@ -502,6 +558,7 @@ const assignVehicle = async (req, res) => {
       pickupAddress: pickupLocation,
       pickup: pickupLocation,
       destination: destinationTerminal,
+      pickupTime: pickupTime || null,
       flightTime: flight?.departureTime || null,
       flightNumber: flight?.flightNumber || null,
       vehicleId,
@@ -600,6 +657,7 @@ const verifyVehicle = async (req, res) => {
     }
 
     await ensureVehicleTables();
+    const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
     const assignment = await getAssignmentByBookingId(bookingId);
 
     // ── Fallback path (DB offline) ──────────────────────────────────────────
@@ -608,7 +666,7 @@ const verifyVehicle = async (req, res) => {
       if (!fallback) {
         return res.status(404).json({ success: false, message: 'Vehicle assignment not found' });
       }
-      if (normalizeVehicleId(fallback.vehicle_id) !== normalizeVehicleId(vehicleId)) {
+      if (normalizeVehicleId(fallback.vehicle_id) !== normalizeVehicleId(resolvedVehicleId)) {
         return res.status(401).json({
           success: false,
           message: `Vehicle ID does not match. Expected ${fallback.vehicle_id}`,
@@ -652,7 +710,7 @@ const verifyVehicle = async (req, res) => {
     // ── Normal DB path ──────────────────────────────────────────────────────
 
     // ★ Vehicle ID match — normalized (strips dashes, spaces, case)
-    if (normalizeVehicleId(assignment.vehicle_id) !== normalizeVehicleId(vehicleId)) {
+    if (normalizeVehicleId(assignment.vehicle_id) !== normalizeVehicleId(resolvedVehicleId)) {
       console.warn(
         `[verifyVehicle] ID mismatch: DB="${assignment.vehicle_id}" got="${vehicleId}"`
       );
@@ -828,16 +886,17 @@ const updateDriverLocation = async (req, res) => {
       return res.status(400).json({ success: false, message: 'vehicleId, lat, lng required' });
     }
     await ensureVehicleTables();
+    const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
     await pool.query(
       `UPDATE drivers SET current_lat=$1, current_lng=$2
        WHERE UPPER(vehicle_id::text)=UPPER($3::text)`,
-      [lat, lng, vehicleId]
+      [lat, lng, resolvedVehicleId]
     );
     if (bookingId) {
       const assignment = await getAssignmentByBookingId(bookingId);
-      if (assignment && normalizeVehicleId(assignment.vehicle_id) === normalizeVehicleId(vehicleId)) {
+      if (assignment && normalizeVehicleId(assignment.vehicle_id) === normalizeVehicleId(resolvedVehicleId)) {
         await upsertVehicleTracking({
-          bookingId, vehicleId,
+          bookingId, vehicleId: resolvedVehicleId,
           driverName: assignment.driver_name,
           status: assignment.status === 'en_route_airport' ? 'En route to Airport' : 'En route to pickup',
           currentLocation: assignment.status === 'en_route_airport'
@@ -949,15 +1008,16 @@ const markEnRoutePickup = async (req, res) => {
       return res.status(400).json({ success: false, message: 'vehicleId required (e.g. CT-102)' });
     }
     await ensureVehicleTables();
+    const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
     let assignment = await getAssignmentByBookingId(bookingId);
-    if (!assignment) assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, vehicleId.trim());
+    if (!assignment) assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, resolvedVehicleId);
     if (!assignment) {
       return res.status(400).json({
         success: false,
         message: 'Unknown booking or vehicle. Use the passenger Booking ID and a Vehicle ID in drivers table.',
       });
     }
-    if (normalizeVehicleId(assignment.vehicle_id) !== normalizeVehicleId(vehicleId)) {
+    if (normalizeVehicleId(assignment.vehicle_id) !== normalizeVehicleId(resolvedVehicleId)) {
       return res.status(401).json({ success: false, message: 'Vehicle ID mismatch' });
     }
     const result = await pool.query(
@@ -1001,15 +1061,16 @@ const markAtPickup = async (req, res) => {
       return res.status(400).json({ success: false, message: 'vehicleId required (e.g. CT-102)' });
     }
     await ensureVehicleTables();
+    const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
     let assignment = await getAssignmentByBookingId(bookingId);
-    if (!assignment) assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, vehicleId.trim());
+    if (!assignment) assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, resolvedVehicleId);
     if (!assignment) {
       return res.status(400).json({
         success: false,
         message: 'Unknown booking or vehicle. Use the passenger Booking ID and a Vehicle ID in drivers table.',
       });
     }
-    if (normalizeVehicleId(assignment.vehicle_id) !== normalizeVehicleId(vehicleId)) {
+    if (normalizeVehicleId(assignment.vehicle_id) !== normalizeVehicleId(resolvedVehicleId)) {
       return res.status(401).json({ success: false, message: 'Vehicle ID mismatch' });
     }
     const result = await pool.query(
@@ -1055,15 +1116,24 @@ const listPendingBookings = async (req, res) => {
       return res.status(400).json({ success: false, message: 'vehicleId required' });
     }
     await ensureVehicleTables();
+    const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
     const result = await pool.query(
       `SELECT va.booking_id, va.vehicle_id, va.driver_name, va.status,
-              va.pickup_location, va.destination_terminal, va.updated_at,
+              va.pickup_location, va.destination_terminal,
+              COALESCE(
+                va.pickup_time,
+                s.slot_time::text,
+                CASE WHEN sb.qr_code LIKE '{%' THEN sb.qr_code::json->>'time' ELSE NULL END
+              ) AS pickup_time,
+              va.updated_at,
               COALESCE(b.passenger_name, 'Passenger') AS passenger_name,
-              COALESCE(b.departure_time, b.flight_time) AS departure_time,
+              b.departure_time AS departure_time,
               COALESCE(b.flight_number, '') AS flight_number,
               COALESCE(va.pickup_location, b.destination, 'Pickup pending') AS pickup_address
        FROM vehicle_assignments va
        LEFT JOIN bookings b ON UPPER(b.booking_id) = UPPER(va.booking_id)
+       LEFT JOIN slot_bookings sb ON UPPER(sb.booking_id) = UPPER(va.booking_id)
+       LEFT JOIN slots s ON s.id = sb.slot_id
        WHERE va.status IN ('dispatched', 'driver_assigned', 'en_route')
          AND (
            UPPER(TRIM(va.vehicle_id)) = UPPER(TRIM($1))
@@ -1071,13 +1141,14 @@ const listPendingBookings = async (req, res) => {
          )
        ORDER BY va.updated_at DESC
        LIMIT 30`,
-      [vehicleId]
+      [resolvedVehicleId]
     );
     const bookings = result.rows.map((row) => ({
       bookingId: row.booking_id,
       passengerName: row.passenger_name,
       pickupAddress: row.pickup_address || row.pickup_location,
       destination: row.destination_terminal,
+      pickupTime: row.pickup_time,
       flightTime: row.departure_time,
       flightNumber: row.flight_number,
       status: row.status,
@@ -1100,9 +1171,10 @@ const acceptBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: 'bookingId and vehicleId are required' });
     }
     await ensureVehicleTables();
+    const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
     let assignment = await getAssignmentByBookingId(bookingId);
     if (!assignment) {
-      assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, vehicleId.trim());
+      assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, resolvedVehicleId);
     }
     if (!assignment) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
@@ -1112,14 +1184,14 @@ const acceptBooking = async (req, res) => {
       `SELECT * FROM drivers
        WHERE UPPER(TRIM(COALESCE(vehicle_id::text,''))) = UPPER(TRIM($1::text))
        LIMIT 1`,
-      [vehicleId]
+      [resolvedVehicleId]
     );
     const driver = driverRes.rows[0];
     if (!driver) {
       return res.status(400).json({ success: false, message: 'Vehicle ID not registered in drivers table' });
     }
 
-    const vid = driver.vehicle_id || vehicleId;
+    const vid = driver.vehicle_id || resolvedVehicleId;
     const result = await pool.query(
       `UPDATE vehicle_assignments
        SET vehicle_id=$1, driver_name=$2, driver_phone=$3,

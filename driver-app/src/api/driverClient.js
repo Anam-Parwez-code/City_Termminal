@@ -21,6 +21,13 @@ export async function fetchTripStatus(bookingId) {
   return data;
 }
 
+export async function fetchBookingDetails(bookingId) {
+  const id = String(bookingId || '').trim();
+  if (!id) throw new Error('Booking ID missing');
+  const { data } = await client.get(`/bookings/${encodeURIComponent(id)}`);
+  return data;
+}
+
 export async function verifyPassengerVehicle({ bookingId, vehicleId }) {
   const id = String(bookingId || '').trim();
   const vehicle = String(vehicleId || '').trim();

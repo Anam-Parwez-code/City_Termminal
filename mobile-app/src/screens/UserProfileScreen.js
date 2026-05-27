@@ -336,22 +336,45 @@ const UserProfileScreen = ({ navigation, route }) => {
     return COLORS.muted;
   };
 
-  // ── Barcode value ─────────────────────────────────
-  const barcodeValue = () => {
-    if (!vehicleData.barcodeData) return bookingId || 'CITY-TERMINAL';
-    try {
-      return typeof vehicleData.barcodeData === 'object'
-        ? JSON.stringify(vehicleData.barcodeData)
-        : String(vehicleData.barcodeData);
-    } catch { return bookingId || 'CITY-TERMINAL'; }
-  };
-
   const barcodePayload = parseBarcodePayload(vehicleData.barcodeData);
   const isBoardingPass = vehicleData.reachedAirport ||
     String(vehicleData.status || '').toLowerCase().includes('airport') ||
     barcodePayload.type === 'digital_boarding_pass';
   const barcodeTitle = isBoardingPass ? 'Digital Boarding Pass' : 'Baggage Receipt';
   const bagStatus = barcodePayload.bagStatus || (isBoardingPass ? 'At terminal' : 'With driver');
+  const enrichedBarcodePayload = {
+    ...barcodePayload,
+    type: isBoardingPass ? 'digital_boarding_pass' : (barcodePayload.type || 'baggage_receipt'),
+    documentType: isBoardingPass ? 'Digital Boarding Pass' : (barcodePayload.documentType || 'Baggage Receipt'),
+    bookingId: barcodePayload.bookingId || bookingId,
+    passengerName: barcodePayload.passengerName || passenger.name,
+    passengerPhone: barcodePayload.passengerPhone || passenger.phone,
+    passportNumber: barcodePayload.passportNumber || passenger.passportNumber,
+    nationality: barcodePayload.nationality || passenger.nationality,
+    dateOfBirth: barcodePayload.dateOfBirth || passenger.dateOfBirth,
+    airline: barcodePayload.airline || flight.airline,
+    flightNumber: barcodePayload.flightNumber || flight.flightNumber,
+    destination: barcodePayload.destination || flight.destination,
+    terminal: barcodePayload.terminal || flight.terminal,
+    departureTime: barcodePayload.departureTime || flight.departureTime,
+    seatNumber: barcodePayload.seatNumber || flight.seatNumber,
+    vehicleId: barcodePayload.vehicleId || vehicleData.vehicleId,
+    driverName: barcodePayload.driverName || vehicleData.driverName,
+    driverPhone: barcodePayload.driverPhone || vehicleData.driverPhone,
+    bagStatus,
+    luggageQrPayload: barcodePayload,
+    generatedAt: barcodePayload.generatedAt || new Date().toISOString(),
+  };
+
+  // ── Barcode value ─────────────────────────────────
+  const barcodeValue = () => {
+    if (!vehicleData.barcodeData) return bookingId || 'CITY-TERMINAL';
+    try {
+      return JSON.stringify(enrichedBarcodePayload);
+    } catch {
+      return bookingId || 'CITY-TERMINAL';
+    }
+  };
 
   // ── Render ────────────────────────────────────────
   if (!bookingId) {
@@ -499,9 +522,9 @@ const UserProfileScreen = ({ navigation, route }) => {
                 </View>
                 <Text style={styles.qrCaption}>SCAN AT AIRPORT COUNTER</Text>
                 <View style={styles.boardingInfo}>
-                  <Text style={styles.boardingLine}>{passenger.name}</Text>
+                  <Text style={styles.boardingLine}>{enrichedBarcodePayload.passengerName || passenger.name}</Text>
                   <Text style={styles.boardingLine}>
-                    {barcodePayload.flightNumber || flight.flightNumber}  {barcodePayload.destination || flight.destination}
+                    {enrichedBarcodePayload.flightNumber || flight.flightNumber}  {enrichedBarcodePayload.destination || flight.destination}
                   </Text>
                   <Text style={styles.boardingMuted}>Bag: {bagStatus}</Text>
                 </View>
