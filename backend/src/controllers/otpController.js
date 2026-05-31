@@ -147,6 +147,7 @@ const ensureVehicleTables = async () => {
   await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS barcode_scanned BOOLEAN DEFAULT false`);
   await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS luggage_tagged BOOLEAN DEFAULT false`);
   await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS pickup_time VARCHAR(80)`);
+  await pool.query(`ALTER TABLE vehicle_assignments ADD COLUMN IF NOT EXISTS driver_id TEXT`);
 
   for (const driver of DRIVERS) {
     await pool.query(
@@ -1166,12 +1167,13 @@ const listPendingBookings = async (req, res) => {
 // ---------------------------------------------------------------------------
 const acceptBooking = async (req, res) => {
   try {
-    const { bookingId, vehicleId } = req.body || {};
-    if (!bookingId || !vehicleId) {
-      return res.status(400).json({ success: false, message: 'bookingId and vehicleId are required' });
+    const { bookingId, vehicleId, driverId } = req.body || {};
+    const idInput = vehicleId || driverId;
+    if (!bookingId || !idInput) {
+      return res.status(400).json({ success: false, message: 'bookingId and vehicleId or driverId are required' });
     }
     await ensureVehicleTables();
-    const resolvedVehicleId = await resolveVehicleIdInput(vehicleId);
+    const resolvedVehicleId = await resolveVehicleIdInput(idInput);
     let assignment = await getAssignmentByBookingId(bookingId);
     if (!assignment) {
       assignment = await ensureAssignmentFromRegisteredVehicle(bookingId, resolvedVehicleId);
@@ -1180,29 +1182,36 @@ const acceptBooking = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
 
+    const driverKey = String(driverId || vehicleId || idInput).trim();
     const driverRes = await pool.query(
       `SELECT * FROM drivers
        WHERE UPPER(TRIM(COALESCE(vehicle_id::text,''))) = UPPER(TRIM($1::text))
+          OR UPPER(REPLACE(TRIM(COALESCE(driver_id::text,'')), 'DRV-', 'DR-')) =
+             UPPER(REPLACE(TRIM($2::text), 'DRV-', 'DR-'))
        LIMIT 1`,
-      [resolvedVehicleId]
+      [resolvedVehicleId, driverKey]
     );
     const driver = driverRes.rows[0];
     if (!driver) {
-      return res.status(400).json({ success: false, message: 'Vehicle ID not registered in drivers table' });
+      return res.status(400).json({
+        success: false,
+        message: 'Driver not registered. Add this Driver ID and Vehicle ID in the drivers table.',
+      });
     }
 
     const vid = driver.vehicle_id || resolvedVehicleId;
     const result = await pool.query(
       `UPDATE vehicle_assignments
-       SET vehicle_id=$1, driver_name=$2, driver_phone=$3,
+       SET vehicle_id=$1, driver_name=$2, driver_phone=$3, driver_id=$4,
            status='driver_assigned',
-           current_location=$4, updated_at=NOW()
-       WHERE UPPER(booking_id)=UPPER($5)
+           current_location=$5, updated_at=NOW()
+       WHERE UPPER(booking_id)=UPPER($6)
        RETURNING *`,
       [
         vid,
         driver.name,
         driver.phone,
+        asPreferredDriverId(driver.driver_id) || driver.driver_id,
         `Driver ${driver.name} accepted — en route soon`,
         bookingId,
       ]
@@ -1244,6 +1253,73 @@ const acceptBooking = async (req, res) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// GET /api/otp/driver-tasks/:driverId — all assignments for logged-in driver
+// ---------------------------------------------------------------------------
+const normalizeDriverIdKey = (id) =>
+  String(id || '').trim().toUpperCase().replace(/^DRV-/, 'DR-');
+
+const listDriverTasks = async (req, res) => {
+  try {
+    const driverId = String(req.params?.driverId || '').trim();
+    if (!driverId) {
+      return res.status(400).json({ success: false, message: 'driverId required' });
+    }
+    await ensureVehicleTables();
+    const key = normalizeDriverIdKey(driverId);
+    const result = await pool.query(
+      `SELECT va.booking_id, va.driver_id, va.vehicle_id, va.driver_name, va.driver_phone, va.status,
+              va.pickup_location, va.destination_terminal, va.current_location,
+              COALESCE(
+                va.pickup_time,
+                s.slot_time::text,
+                CASE WHEN sb.qr_code LIKE '{%' THEN sb.qr_code::json->>'time' ELSE NULL END
+              ) AS pickup_time,
+              va.updated_at, va.reached_pickup, va.reached_airport,
+              COALESCE(b.passenger_name, 'Passenger') AS passenger_name,
+              b.departure_time AS departure_time,
+              COALESCE(b.flight_number, '') AS flight_number,
+              COALESCE(b.airline_code, '') AS airline,
+              COALESCE(va.pickup_location, b.destination, 'Pickup pending') AS pickup_address
+       FROM vehicle_assignments va
+       LEFT JOIN bookings b ON UPPER(b.booking_id) = UPPER(va.booking_id)
+       LEFT JOIN slot_bookings sb ON UPPER(sb.booking_id) = UPPER(va.booking_id)
+       LEFT JOIN slots s ON s.id = sb.slot_id
+       LEFT JOIN drivers d ON UPPER(TRIM(d.vehicle_id)) = UPPER(TRIM(va.vehicle_id))
+       WHERE UPPER(REPLACE(TRIM(COALESCE(va.driver_id, '')), 'DRV-', 'DR-')) = UPPER($1)
+          OR UPPER(REPLACE(TRIM(COALESCE(d.driver_id, '')), 'DRV-', 'DR-')) = UPPER($1)
+       ORDER BY va.updated_at DESC
+       LIMIT 50`,
+      [key]
+    );
+
+    const tasks = result.rows.map((row) => ({
+      bookingId: row.booking_id,
+      driverId: row.driver_id || driverId,
+      passengerName: row.passenger_name,
+      pickupAddress: row.pickup_address || row.pickup_location,
+      pickup: row.pickup_location,
+      destination: row.destination_terminal,
+      pickupTime: row.pickup_time,
+      flightTime: row.departure_time,
+      flightNumber: row.flight_number,
+      airline: row.airline,
+      status: row.status,
+      statusLabel: STATUS_LABELS[row.status] || row.status,
+      vehicleId: row.vehicle_id,
+      driverName: row.driver_name,
+      driverPhone: row.driver_phone,
+      currentLocation: row.current_location,
+      reachedPickup: row.reached_pickup === true,
+      reachedAirport: row.reached_airport === true,
+    }));
+    return res.status(200).json({ success: true, tasks });
+  } catch (error) {
+    console.error('listDriverTasks error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Backward-compat alias
 const getStatus = getOTPStatus;
 
@@ -1258,5 +1334,6 @@ module.exports = {
   getOTPStatus,
   getStatus,
   listPendingBookings,
+  listDriverTasks,
   acceptBooking,
 };

@@ -6,7 +6,6 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import DriverLoginScreen from './src/screens/DriverLoginScreen';
 import DriverTripScreen from './src/screens/DriverTripScreen';
 import DriverProfileScreen from './src/screens/DriverProfileScreen';
-import { loadDriverSession } from './src/sessionStorage';
 
 const Stack = createNativeStackNavigator();
 
@@ -15,25 +14,12 @@ const COLORS = {
   green: '#47d361',
 };
 
+/** Always open Login first — driver picks / confirms Driver ID before Profile */
 export default function App() {
   const [boot, setBoot] = useState(null);
 
   useEffect(() => {
-    loadDriverSession().then((session) => {
-    console.log("Loaded Session:", session); // Yeh terminal mein dekho
-   // setBoot(session.vehicleId ? 'Trip' : 'Login');
- // }).catch((err) => {
-    //console.error("Session load error:", err);
-   // setBoot('Login');
-   if (session && (session.driverId || session.vehicleId)) {
-        setBoot('Trip');
-      } else {
-        setBoot('Login');
-      }
-    }).catch((err) => {
-      console.error("Session load error:", err);
-      setBoot('Login');
-    });
+    setBoot('Login');
   }, []);
 
   if (!boot) {

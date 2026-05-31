@@ -32,6 +32,8 @@ import TimeSlotScreen from '../screens/TimeSlotScreen';
 import DriverTripScreen from '../screens/DriverTripScreen';
 import DriverProfileScreen from '../screens/DriverProfileScreen';
 import theme from '../theme';
+import adminService from '../services/adminService';
+import { loadPassengerTrip } from '../services/passengerTripStorage';
 // Stack navigator create karo
 // Stack = stack of screens — jaise cards ka dhair
 const Stack = createNativeStackNavigator();
@@ -68,6 +70,42 @@ const AppNavigator = () => {
     if (!navigationRef.isReady()) return;
     setMenuOpen(false);
     navigationRef.navigate(name, params);
+  };
+
+  const handleHomePress = async () => {
+    setMenuOpen(false);
+    const savedTrip = await loadPassengerTrip();
+    const bookingId =
+      bookingIdRef.current ||
+      savedTrip?.bookingId ||
+      (await adminService.getCurrentBookingId()) ||
+      '';
+
+    if (savedTrip?.atAirport && bookingId) {
+      navigateSafe('Confirmation', {
+        ...(savedTrip.params || {}),
+        bookingId,
+        isBoardingPass: true,
+      });
+      return;
+    }
+
+    if (bookingId && savedTrip && savedTrip.phase !== 'complete' && !savedTrip.atAirport) {
+      navigateSafe('LiveTracking', {
+        ...(savedTrip.params || {}),
+        bookingId,
+      });
+      return;
+    }
+
+    if (bookingId && savedTrip?.vehicleVerified) {
+      navigateSafe('UserProfile', { bookingId, ...(savedTrip.params || {}) });
+      return;
+    }
+
+    if (navigationRef.canGoBack()) {
+      navigationRef.goBack();
+    }
   };
 
   const showControls = !hideFloatingControls.has(currentRoute);
@@ -122,16 +160,7 @@ const AppNavigator = () => {
 
           {menuOpen && (
             <View style={styles.menuCard}>
-              <TouchableOpacity style={styles.menuItem} onPress={() => {
-                setMenuOpen(false);
-                if (currentRoute === 'UserProfile' || currentRoute === 'DriverProfile' || currentRoute === 'AdminDashboard') {
-                  if (navigationRef.canGoBack()) {
-                    navigationRef.goBack();
-                    return;
-                  }
-                }
-                // If unable to go back, we can just leave it or go to home screen for user
-              }}>
+              <TouchableOpacity style={styles.menuItem} onPress={handleHomePress}>
                 <Text style={styles.menuText}>Home</Text>
               </TouchableOpacity>
               <TouchableOpacity

@@ -58,7 +58,10 @@ api.interceptors.response.use(
       throw new Error('Network error. Check your WiFi connection.');
     }
     const message = error.response?.data?.message || 'Something went wrong';
-    throw new Error(message);
+    const err = new Error(message);
+    err.status = error.response?.status;
+    err.payload = error.response?.data;
+    throw err;
   }
 );
 
@@ -99,12 +102,15 @@ const apiService = {
   // POST /api/passport/scan
   // BUG FIX: 'image' → 'imageBase64' field name match kiya backend se
   verifyPassport: async ({ imageBase64, bookingId }) => {
-    const result = await api.post('/passport/scan', {
-      imageBase64: imageBase64, // ← FIXED: backend mein 'imageBase64' expect karta hai
-      bookingId,
-    });
+    const result = await api.post(
+      '/passport/scan',
+      {
+        imageBase64,
+        bookingId,
+      },
+      { timeout: 90000 },
+    );
     return result;
-    // Returns: { success: true, data: { name, passportNumber, dateOfBirth, ... } }
   },
 
   // ── AI CHAT STREAM (SSE) ────────────────────────────────

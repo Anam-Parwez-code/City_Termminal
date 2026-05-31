@@ -10,6 +10,7 @@ import {
   Platform,
   Modal,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { io } from 'socket.io-client';
@@ -17,12 +18,54 @@ import { socketOrigin } from '../services/driverClient';
 import driverClient, { apiErrorMessage } from '../services/driverClient';
 import { loadDriverSession, saveDriverSession } from '../services/driverSession';
 
+const normalizeStatus = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+
+const statusToDone = (status) => {
+  const n = normalizeStatus(status);
+  return {
+    enRoute: ['en_route', 'en_route_to_pickup', 'arrived_at_pickup', 'at_pickup', 'barcode_issued', 'en_route_airport', 'at_airport'].includes(n),
+    atPickup: ['arrived_at_pickup', 'at_pickup', 'barcode_issued', 'en_route_airport', 'at_airport'].includes(n),
+    verify: ['barcode_issued', 'en_route_airport', 'at_airport'].includes(n),
+    airport: ['en_route_airport', 'en_route_to_airport', 'at_airport'].includes(n),
+    landed: ['at_airport', 'arrived_at_airport', 'at_terminal'].includes(n),
+  };
+};
+
+function ActionBtn({ title, doneLabel, done, loading, disabled, onPress, variant }) {
+  return (
+    <TouchableOpacity
+      style={[
+        variant === 'airport' ? styles.btnAirport : styles.btn,
+        done && styles.btnDone,
+        disabled && !done && styles.btnDisabled,
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      {loading ? (
+        <ActivityIndicator color="#08110a" />
+      ) : (
+        <Text style={[styles.btnTxt, done && styles.btnTxtDone]}>
+          {done ? `Done — ${doneLabel}` : title}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 export default function DriverTripScreen({ navigation }) {
   const [bookingId, setBookingId] = useState('');
   const [vehicleId, setVehicleId] = useState('');
+  const [passengerOtp, setPassengerOtp] = useState('');
   const [log, setLog] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [incomingAssignment, setIncomingAssignment] = useState(null);
+  const [completed, setCompleted] = useState({});
+  const [loadingKey, setLoadingKey] = useState('');
   const watchRef = useRef(null);
 
   const append = useCallback((line) => {
@@ -31,10 +74,36 @@ export default function DriverTripScreen({ navigation }) {
 
   const socket = useMemo(() => io(socketOrigin, { transports: ['websocket', 'polling'] }), []);
 
+  const applyStatus = useCallback((status) => {
+    setCompleted((prev) => ({ ...prev, ...statusToDone(status) }));
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    if (!bookingId.trim()) return;
+    try {
+      const { data } = await driverClient.get(`/otp/status/${encodeURIComponent(bookingId.trim())}`);
+      const st = data?.status || data?.assignment || {};
+      if (st.status) applyStatus(st.status);
+      if (st.vehicleId || st.vehicle_id) setVehicleId(String(st.vehicleId || st.vehicle_id).toUpperCase());
+    } catch (_e) {
+      /* ignore */
+    }
+  }, [applyStatus, bookingId]);
+
   useEffect(() => {
     socket.emit('join_dispatch');
-    return () => socket.disconnect();
-  }, [socket]);
+    if (bookingId.trim()) socket.emit('join_booking', { bookingId: bookingId.trim() });
+    socket.on('status_update', (payload) => {
+      const pb = String(payload.bookingId || payload.booking_id || '').toUpperCase();
+      if (pb && pb === String(bookingId).toUpperCase() && payload.status) {
+        applyStatus(payload.status);
+      }
+    });
+    return () => {
+      socket.emit('leave_dispatch');
+      socket.disconnect();
+    };
+  }, [applyStatus, bookingId, socket]);
 
   useEffect(() => {
     loadDriverSession().then(({ bookingId: b, vehicleId: v }) => {
@@ -50,12 +119,97 @@ export default function DriverTripScreen({ navigation }) {
     return () => clearTimeout(t);
   }, [bookingId, vehicleId]);
 
+  useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
+
   const requireIds = () => {
     if (!bookingId.trim() || !vehicleId.trim()) {
-      Alert.alert('Required', 'Enter Booking ID and Vehicle ID (e.g. CT-102) first.');
+      Alert.alert('Required', 'Enter Booking ID and Vehicle ID (e.g. CT-114) first.');
       return false;
     }
     return true;
+  };
+
+  const emitStatus = (status, extra = {}) => {
+    socket.emit('status_update', {
+      bookingId: bookingId.trim(),
+      booking_id: bookingId.trim(),
+      vehicleId: vehicleId.trim(),
+      vehicle_number: vehicleId.trim(),
+      status,
+      updated_at: new Date().toISOString(),
+      ...extra,
+    });
+    applyStatus(status);
+  };
+
+  const run = async (key, fn, doneLabel, statusLabel) => {
+    if (!requireIds() || loadingKey) return;
+    setLoadingKey(key);
+    try {
+      await fn();
+      setCompleted((prev) => ({ ...prev, [key]: true }));
+      if (statusLabel) emitStatus(statusLabel);
+      append(`Done: ${doneLabel}`);
+    } catch (err) {
+      append(`${doneLabel}: ${apiErrorMessage(err)}`);
+      Alert.alert('Could not update', apiErrorMessage(err));
+    } finally {
+      setLoadingKey('');
+    }
+  };
+
+  const markEnRoutePickup = () =>
+    run(
+      'enRoute',
+      () =>
+        driverClient.post('/otp/mark-en-route', {
+          bookingId: bookingId.trim(),
+          vehicleId: vehicleId.trim(),
+        }),
+      'En route to pickup',
+      'En route to pickup',
+    );
+
+  const markAtPickup = () =>
+    run(
+      'atPickup',
+      () =>
+        driverClient.post('/otp/mark-at-pickup', {
+          bookingId: bookingId.trim(),
+          vehicleId: vehicleId.trim(),
+        }),
+      'Arrived at pickup',
+      'Arrived at Pickup',
+    );
+
+  const verifyPassenger = async () => {
+    if (!requireIds() || loadingKey) return;
+    if (!passengerOtp.trim()) {
+      Alert.alert('Required', 'Enter passenger Vehicle ID (CT-xxx).');
+      return;
+    }
+    if (passengerOtp.trim().toUpperCase() !== vehicleId.trim().toUpperCase()) {
+      Alert.alert('Invalid OTP', 'Passenger OTP does not match your Vehicle ID.');
+      return;
+    }
+    setLoadingKey('verify');
+    try {
+      const { data } = await driverClient.post('/otp/verify-vehicle', {
+        bookingId: bookingId.trim(),
+        vehicleId: vehicleId.trim(),
+      });
+      setCompleted((prev) => ({ ...prev, verify: true }));
+      const barcode = data?.status?.barcodeData || data?.status?.barcode_data;
+      emitStatus('Barcode issued', { barcodeData: barcode, barcode_data: barcode });
+      append('Done: Passenger verified');
+    } catch (err) {
+      append(`Verify: ${apiErrorMessage(err)}`);
+      Alert.alert('Verification failed', apiErrorMessage(err));
+    } finally {
+      setLoadingKey('');
+    }
   };
 
   const ensureLocationAllowed = async () => {
@@ -75,23 +229,17 @@ export default function DriverTripScreen({ navigation }) {
         lat: coords.latitude,
         lng: coords.longitude,
       });
-      append(`GPS synced (${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)})`);
     } catch (err) {
-      append(`GPS API error: ${apiErrorMessage(err)}`);
+      append(`GPS: ${apiErrorMessage(err)}`);
     }
-
     socket.emit('location_update', {
       bookingId: bookingId.trim(),
-      booking_id: bookingId.trim(),
       vehicleId: vehicleId.trim(),
       vehicle_number: vehicleId.trim(),
       lat: coords.latitude,
       lng: coords.longitude,
       updated_at: new Date().toISOString(),
       status: 'Live',
-      current_location: 'Driver GPS ping',
-      map_x: 0,
-      map_y: 0,
     });
   };
 
@@ -102,124 +250,42 @@ export default function DriverTripScreen({ navigation }) {
     }
   };
 
-  const markEnRoutePickup = async () => {
-    if (!requireIds()) return;
-    try {
-      await driverClient.post('/otp/mark-en-route', {
-        bookingId: bookingId.trim(),
-        vehicleId: vehicleId.trim(),
-      });
-      append('Marked: driving to passenger pickup');
-      socket.emit('status_update', {
-        bookingId: bookingId.trim(),
-        booking_id: bookingId.trim(),
-        vehicle_number: vehicleId.trim(),
-        vehicleId: vehicleId.trim(),
-        status: 'En route to pickup',
-        updated_at: new Date().toISOString(),
-      });
-    } catch (err) {
-      append(`mark-en-route: ${apiErrorMessage(err)}`);
-      Alert.alert('Could not update status', apiErrorMessage(err));
-    }
-  };
-
-  const markAtPickup = async () => {
-    if (!requireIds()) return;
-    try {
-      await driverClient.post('/otp/mark-at-pickup', {
-        bookingId: bookingId.trim(),
-        vehicleId: vehicleId.trim(),
-      });
-      append('Marked: arrived at pickup — passenger can verify Vehicle ID');
-      socket.emit('status_update', {
-        bookingId: bookingId.trim(),
-        booking_id: bookingId.trim(),
-        vehicle_number: vehicleId.trim(),
-        vehicleId: vehicleId.trim(),
-        status: 'Arrived at Pickup',
-        updated_at: new Date().toISOString(),
-      });
-    } catch (err) {
-      append(`mark-at-pickup: ${apiErrorMessage(err)}`);
-      Alert.alert('Could not update status', apiErrorMessage(err));
-    }
-  };
-
   const startSharing = async () => {
     if (!requireIds()) return;
-
-    const ok = await ensureLocationAllowed();
-    if (!ok) return;
-
+    if (!(await ensureLocationAllowed())) return;
     await stopWatch();
-    append('Watching GPS every 15s …');
-
     watchRef.current = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, timeInterval: 15000, distanceInterval: 20 },
-      (loc) => {
-        pushGpsPing(loc.coords);
-      },
+      (loc) => pushGpsPing(loc.coords),
     );
-
     const first = await Location.getCurrentPositionAsync({});
     pushGpsPing(first.coords);
+    append('GPS sharing started');
   };
 
-  const startAirportTrip = async () => {
-    if (!requireIds()) return;
-    try {
-      await driverClient.post('/otp/airport-trip', { bookingId: bookingId.trim() });
-      socket.emit('status_update', {
-        bookingId: bookingId.trim(),
-        booking_id: bookingId.trim(),
-        vehicleId: vehicleId.trim(),
-        vehicle_number: vehicleId.trim(),
-        status: 'En route to Airport',
-        updated_at: new Date().toISOString(),
-      });
-      append('Marked heading to airport ✓');
-      Alert.alert('Airport trip', 'Passenger tracking updates to airport leg.');
-    } catch (err) {
-      append(`Airport trip: ${apiErrorMessage(err)}`);
-      Alert.alert('Airport trip failed', apiErrorMessage(err));
-    }
-  };
+  const startAirportTrip = () =>
+    run(
+      'airport',
+      () => driverClient.post('/otp/airport-trip', { bookingId: bookingId.trim() }),
+      'Heading to airport',
+      'En route to Airport',
+    );
 
-  const markAirportDone = async () => {
-    if (!requireIds()) return;
-    try {
-      await driverClient.put(`/otp/reached/${encodeURIComponent(bookingId.trim())}`);
-      socket.emit('status_update', {
-        bookingId: bookingId.trim(),
-        booking_id: bookingId.trim(),
-        vehicleId: vehicleId.trim(),
-        vehicle_number: vehicleId.trim(),
-        status: 'Arrived — At Airport',
-        updated_at: new Date().toISOString(),
-      });
-      append('Terminal arrival broadcast ✓');
-      Alert.alert('Arrived', 'Admin + passenger see landed status.');
-    } catch (err) {
-      append(`Arrival: ${apiErrorMessage(err)}`);
-      Alert.alert('Arrival failed', apiErrorMessage(err));
-    }
-  };
+  const markAirportDone = () =>
+    run(
+      'landed',
+      () => driverClient.put(`/otp/reached/${encodeURIComponent(bookingId.trim())}`),
+      'At terminal',
+      'Arrived — At Airport',
+    );
 
-  const openProfile = () => {
-    setMenuOpen(false);
-    navigation.navigate('Profile');
-  };
+  const done = (key) => completed[key] === true;
+  const busy = Boolean(loadingKey);
 
   return (
     <View style={styles.outer}>
       <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.hamCircle}
-          onPress={() => setMenuOpen(true)}
-          accessibilityLabel="Open menu"
-          hitSlop={12}
-        >
+        <TouchableOpacity style={styles.hamCircle} onPress={() => setMenuOpen(true)}>
           <Text style={styles.hamLines}>☰</Text>
         </TouchableOpacity>
         <View style={styles.topTitles}>
@@ -232,13 +298,8 @@ export default function DriverTripScreen({ navigation }) {
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
           <Pressable style={styles.menuSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.menuBrand}>Menu</Text>
-            <TouchableOpacity style={styles.menuRow} onPress={openProfile}>
-              <Text style={styles.menuRowIcon}>◉</Text>
-              <View>
-                <Text style={styles.menuRowTitle}>My Profile</Text>
-                <Text style={styles.menuRowSub}>Driver details, QR barcode, trip phase</Text>
-              </View>
+            <TouchableOpacity style={styles.menuRow} onPress={() => { setMenuOpen(false); navigation.navigate('Profile'); }}>
+              <Text style={styles.menuRowTitle}>My Profile</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuClose} onPress={() => setMenuOpen(false)}>
               <Text style={styles.menuCloseTxt}>Close</Text>
@@ -250,83 +311,112 @@ export default function DriverTripScreen({ navigation }) {
       <Modal visible={!!incomingAssignment} transparent animationType="slide">
         <View style={styles.assignmentBackdrop}>
           <View style={styles.assignmentCard}>
-            <Text style={styles.assignmentEyebrow}>New Booking Assigned</Text>
-            <Text style={styles.assignmentTitle}>{incomingAssignment?.passengerName || 'Passenger'}</Text>
-            <Text style={styles.assignmentLocation}>Pickup: {incomingAssignment?.pickup || 'DXB'}</Text>
-            <Text style={styles.assignmentLocation}>Destination: {incomingAssignment?.destination || 'Terminal'}</Text>
-            
-            <View style={styles.assignmentActions}>
-              <TouchableOpacity style={styles.declineBtn} onPress={() => setIncomingAssignment(null)}>
-                <Text style={styles.declineTxt}>Decline</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.acceptBtn} onPress={() => {
+            <Text style={styles.assignmentTitle}>{incomingAssignment?.bookingId}</Text>
+            <TouchableOpacity
+              style={styles.acceptBtn}
+              onPress={() => {
                 setBookingId(incomingAssignment.bookingId);
                 setIncomingAssignment(null);
-                append('Accepted new assignment.');
-              }}>
-                <Text style={styles.acceptTxt}>Accept</Text>
-              </TouchableOpacity>
-            </View>
+              }}
+            >
+              <Text style={styles.acceptTxt}>Accept</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
       <ScrollView style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <TouchableOpacity style={styles.demoBtn} onPress={() => setIncomingAssignment({
-          bookingId: 'EK123456', passengerName: 'Mohammed Al Fayed', pickup: 'Downtown Dubai', destination: 'DXB T3'
-        })}>
-          <Text style={styles.demoBtnTxt}>Simulate Incoming Assignment</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.note}>
-          Enter the passenger Booking ID and your roster Vehicle ID (must match drivers DB e.g. CT-102). If the
-          passenger has not confirmed pickup yet, the server will still link this van to the booking when possible.
-        </Text>
-
         <Text style={styles.label}>Booking ID</Text>
         <TextInput
-          placeholder="EK123456789"
+          placeholder="DXB8888"
           value={bookingId}
-          onChangeText={setBookingId}
+          onChangeText={(v) => {
+            setBookingId(v);
+            setCompleted({});
+          }}
           autoCapitalize="characters"
           style={styles.input}
+          onBlur={refreshStatus}
         />
 
         <Text style={styles.label}>Vehicle ID</Text>
         <TextInput
-          placeholder="CT-102"
+          placeholder="CT-114"
           value={vehicleId}
           onChangeText={setVehicleId}
           autoCapitalize="characters"
           style={styles.input}
         />
 
-        <TouchableOpacity style={styles.btn} onPress={markEnRoutePickup}>
-          <Text style={styles.btnTxt}>1 · En route to passenger pickup</Text>
-        </TouchableOpacity>
+        <ActionBtn
+          title="1 · En route to pickup"
+          doneLabel="En route to pickup"
+          done={done('enRoute')}
+          loading={loadingKey === 'enRoute'}
+          disabled={busy || done('enRoute')}
+          onPress={markEnRoutePickup}
+        />
 
-        <TouchableOpacity style={styles.btn} onPress={markAtPickup}>
-          <Text style={styles.btnTxt}>2 · Arrived at pickup (Vehicle ID step)</Text>
-        </TouchableOpacity>
+        <ActionBtn
+          title="2 · Arrived at pickup"
+          doneLabel="At pickup"
+          done={done('atPickup')}
+          loading={loadingKey === 'atPickup'}
+          disabled={busy || done('atPickup')}
+          onPress={markAtPickup}
+        />
 
-        <TouchableOpacity style={styles.btn} onPress={startSharing}>
-          <Text style={styles.btnTxt}>Start live GPS (pickup ↔ airport)</Text>
-        </TouchableOpacity>
+        <View style={styles.otpCard}>
+          <Text style={styles.label}>Passenger OTP (Vehicle ID)</Text>
+          <TextInput
+            placeholder="CT-114"
+            value={passengerOtp}
+            onChangeText={setPassengerOtp}
+            autoCapitalize="characters"
+            style={styles.input}
+          />
+          <TouchableOpacity
+            style={[styles.btnOtp, done('verify') && styles.btnDone]}
+            onPress={verifyPassenger}
+            disabled={busy || done('verify')}
+          >
+            {loadingKey === 'verify' ? (
+              <ActivityIndicator color="#000" />
+            ) : (
+              <Text style={[styles.btnTxt, { color: '#000' }]}>
+                {done('verify') ? 'Done — Verified' : '3 · Verify passenger'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
+        <TouchableOpacity style={styles.btnMuted} onPress={startSharing}>
+          <Text style={styles.btnTxtMuted}>Start live GPS</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.btnMuted} onPress={stopWatch}>
-          <Text style={styles.btnTxtMuted}>Pause GPS watcher</Text>
+          <Text style={styles.btnTxtMuted}>Pause GPS</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btn} onPress={startAirportTrip}>
-          <Text style={styles.btnTxt}>Announce “heading to airport”</Text>
-        </TouchableOpacity>
+        <ActionBtn
+          title="4 · Heading to airport"
+          doneLabel="En route to airport"
+          done={done('airport')}
+          loading={loadingKey === 'airport'}
+          disabled={busy || done('airport')}
+          onPress={startAirportTrip}
+        />
 
-        <TouchableOpacity style={styles.btnAirport} onPress={markAirportDone}>
-          <Text style={styles.btnTxt}>Mark landed at terminal</Text>
-        </TouchableOpacity>
+        <ActionBtn
+          title="5 · Marked at airport"
+          doneLabel="At terminal"
+          done={done('landed')}
+          loading={loadingKey === 'landed'}
+          disabled={busy || done('landed')}
+          onPress={markAirportDone}
+          variant="airport"
+        />
 
-        <Text style={styles.log}>{log || 'Telemetry log shows here …'}</Text>
-        <Text style={styles.footer}>{Platform.OS} · API {driverClient.defaults.baseURL}</Text>
+        <Text style={styles.log}>{log || 'Status log…'}</Text>
       </ScrollView>
     </View>
   );
@@ -343,7 +433,6 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#111827',
-    backgroundColor: '#060708',
   },
   hamCircle: {
     width: 46,
@@ -360,45 +449,14 @@ const styles = StyleSheet.create({
   topTitles: { alignItems: 'center', flex: 1 },
   brandEyebrow: { color: '#47d361', fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
   brandTitle: { color: '#fff', fontSize: 17, fontWeight: '900', marginTop: 2 },
-  menuBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    flexDirection: 'row',
-  },
-  menuSheet: {
-    width: '78%',
-    maxWidth: 320,
-    backgroundColor: '#0a0c10',
-    paddingTop: Platform.OS === 'android' ? 48 : 56,
-    paddingHorizontal: 20,
-    paddingBottom: 28,
-    borderRightWidth: 1,
-    borderColor: '#1f2937',
-  },
-  menuBrand: { color: '#9ca3af', fontWeight: '900', fontSize: 12, letterSpacing: 2, marginBottom: 24 },
-  menuRow: {
-    flexDirection: 'row',
-    gap: 14,
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1f2937',
-  },
-  menuRowIcon: { color: '#47d361', fontSize: 18 },
-  menuRowTitle: { color: '#fff', fontSize: 17, fontWeight: '900' },
-  menuRowSub: { color: '#6b7280', fontSize: 12, marginTop: 4, maxWidth: 220 },
-  menuClose: {
-    marginTop: 28,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
+  menuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  menuSheet: { width: '78%', backgroundColor: '#0a0c10', padding: 24, paddingTop: 56 },
+  menuRow: { paddingVertical: 16 },
+  menuRowTitle: { color: '#fff', fontWeight: '900', fontSize: 17 },
+  menuClose: { marginTop: 20, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#374151', borderRadius: 14 },
   menuCloseTxt: { color: '#d1d5db', fontWeight: '800' },
   root: { flex: 1 },
-  content: { padding: 22, paddingTop: 16, gap: 6, paddingBottom: 40 },
-  note: { color: '#9ca3af', fontSize: 13, marginBottom: 18, lineHeight: 19 },
+  content: { padding: 22, paddingBottom: 40 },
   label: { color: '#d1d5db', fontWeight: '700', marginTop: 12, marginBottom: 6 },
   input: {
     backgroundColor: '#111827',
@@ -411,36 +469,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  btn: { backgroundColor: '#47d361', borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 18 },
-  btnTxt: { fontWeight: '900', fontSize: 15, color: '#08110a' },
-  btnMuted: {
-    marginTop: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#374151',
-    padding: 14,
-    alignItems: 'center',
-  },
+  btn: { backgroundColor: '#47d361', borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 14, minHeight: 50, justifyContent: 'center' },
+  btnDone: { backgroundColor: '#4B5563', borderWidth: 1, borderColor: '#9CA3AF' },
+  btnDisabled: { opacity: 0.65 },
+  btnTxt: { fontWeight: '900', fontSize: 15, color: '#08110a', textAlign: 'center' },
+  btnTxtDone: { color: '#F3F4F6' },
+  btnMuted: { marginTop: 10, borderRadius: 14, borderWidth: 1, borderColor: '#374151', padding: 14, alignItems: 'center' },
   btnTxtMuted: { color: '#9ca3af', fontWeight: '800' },
-  btnAirport: { backgroundColor: '#163a1c', borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 14 },
-  log: {
-    marginTop: 26,
-    color: '#9ca3af',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  footer: { marginTop: 16, fontSize: 11, color: '#6b7280' },
+  btnAirport: { backgroundColor: '#163a1c', borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 14, minHeight: 50, justifyContent: 'center' },
+  btnOtp: { backgroundColor: '#eab308', borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 12 },
+  otpCard: { backgroundColor: '#1c1910', borderRadius: 16, padding: 14, marginTop: 14, borderWidth: 1, borderColor: '#854d0e' },
+  log: { marginTop: 20, color: '#6b7280', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   assignmentBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 24 },
-  assignmentCard: { backgroundColor: '#111827', padding: 24, borderRadius: 24, borderWidth: 1, borderColor: '#374151' },
-  assignmentEyebrow: { color: '#47d361', fontWeight: '900', fontSize: 12, textTransform: 'uppercase', marginBottom: 8 },
-  assignmentTitle: { color: '#fff', fontSize: 24, fontWeight: '900', marginBottom: 16 },
-  assignmentLocation: { color: '#d1d5db', fontSize: 15, fontWeight: '600', marginBottom: 8 },
-  assignmentActions: { flexDirection: 'row', gap: 12, marginTop: 24 },
-  declineBtn: { flex: 1, paddingVertical: 16, borderRadius: 14, borderWidth: 1, borderColor: '#ef4444', alignItems: 'center' },
-  declineTxt: { color: '#ef4444', fontWeight: '900', fontSize: 16 },
-  acceptBtn: { flex: 1, paddingVertical: 16, borderRadius: 14, backgroundColor: '#47d361', alignItems: 'center' },
-  acceptTxt: { color: '#08100a', fontWeight: '900', fontSize: 16 },
-  demoBtn: { backgroundColor: '#1f2937', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
-  demoBtnTxt: { color: '#9ca3af', fontWeight: '800' },
+  assignmentCard: { backgroundColor: '#111827', padding: 24, borderRadius: 24 },
+  assignmentTitle: { color: '#fff', fontSize: 22, fontWeight: '900', marginBottom: 16 },
+  acceptBtn: { backgroundColor: '#47d361', padding: 16, borderRadius: 14, alignItems: 'center' },
+  acceptTxt: { color: '#08100a', fontWeight: '900' },
 });

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
+import { formatNationality } from '../services/passportOcr';
 import theme from '../theme';
 
 const COLORS = {
@@ -77,7 +78,9 @@ const VerificationScreen = ({ navigation, route }) => {
   const [name, setName] = useState(passportData?.name || '');
   const [passportNo, setPassportNo] = useState(passportData?.passportNumber || '');
   const [dob, setDob] = useState(passportData?.dateOfBirth || '');
-  const [nationality, setNationality] = useState(passportData?.nationality || '');
+  const [nationality, setNationality] = useState(
+    formatNationality(passportData?.nationality) || passportData?.nationality || '',
+  );
   const [editField, setEditField] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -241,7 +244,9 @@ const VerificationScreen = ({ navigation, route }) => {
             resizeMode="cover"
           />
           <View style={styles.aiTag}>
-            <Text style={styles.aiTagText}>🤖 AI Extracted</Text>
+            <Text style={styles.aiTagText}>
+              {passportData?.mode === 'device-tesseract' ? '📷 Device OCR' : '🔍 Tesseract OCR'}
+            </Text>
           </View>
         </View>
       )}
@@ -252,7 +257,18 @@ const VerificationScreen = ({ navigation, route }) => {
         <InfoField label={t('verification.fullName')} value={name} field="name" onChangeText={setName} />
         <InfoField label={t('verification.passportNumber')} value={passportNo} field="passportNo" onChangeText={setPassportNo} />
         <InfoField label={t('verification.dateOfBirth')} value={dob} field="dob" onChangeText={setDob} />
-        <InfoField label={t('verification.nationality')} value={nationality} field="nationality" onChangeText={setNationality} />
+        <InfoField
+          label={t('verification.nationality')}
+          value={nationality}
+          field="nationality"
+          onChangeText={(text) => setNationality(formatNationality(text) || text)}
+        />
+        {nationality ? (
+          <View style={styles.nationalityBanner}>
+            <Text style={styles.nationalityBannerLabel}>Nationality (from passport)</Text>
+            <Text style={styles.nationalityBannerValue}>{nationality}</Text>
+          </View>
+        ) : null}
       </View>
 
       {/* FLIGHT INFO */}
@@ -330,6 +346,23 @@ const styles = StyleSheet.create({
   section: { marginBottom: 24 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 12 },
   fieldContainer: { backgroundColor: COLORS.card, borderRadius: 14, padding: 16, marginBottom: 8, borderWidth: 1, borderColor: COLORS.line },
+  nationalityBanner: {
+    backgroundColor: 'rgba(71,211,97,0.1)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(71,211,97,0.35)',
+  },
+  nationalityBannerLabel: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  nationalityBannerValue: { color: COLORS.green, fontSize: 17, fontWeight: '900' },
   fieldLabel: { fontSize: 11, fontWeight: '600', color: COLORS.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
   fieldRow: { flexDirection: 'row', alignItems: 'center' },
   fieldValue: { flex: 1, fontSize: 16, fontWeight: '500', color: COLORS.text },

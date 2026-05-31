@@ -21,9 +21,11 @@ import driverClient, {
   fetchBookingDetails,
   fetchPendingBookings,
   fetchTripStatus,
+  resolveVehicleForDriver,
   verifyPassengerVehicle,
 } from '../api/driverClient';
 import { loadDriverSession, saveDriverSession } from '../sessionStorage';
+import { formatTaskStatus, statusToDone, statusBadgeColor } from '../utils/tripStatus';
 
 const ACTIONS = [
   {
@@ -55,18 +57,6 @@ const ACTIONS = [
     request: (bookingId) => driverClient.put(`/otp/reached/${encodeURIComponent(bookingId)}`),
   },
 ];
-
-const normalize = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
-
-const statusToDone = (status) => {
-  const normalized = normalize(status);
-  return {
-    enRoutePickup: ['en_route', 'en_route_to_pickup', 'arrived_at_pickup', 'en_route_airport', 'at_airport'].includes(normalized),
-    atPickup: ['arrived_at_pickup', 'at_pickup', 'picked_up', 'barcode_issued', 'en_route_airport', 'at_airport'].includes(normalized),
-    airportTrip: ['en_route_airport', 'en_route_to_airport', 'en_route_to_airport', 'at_airport'].includes(normalized),
-    airportDone: ['at_airport', 'arrived_at_airport', 'arrived_-_at_airport', 'at_terminal'].includes(normalized),
-  };
-};
 
 const pick = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
 
@@ -106,7 +96,9 @@ const buildTripFromPayload = (payload = {}) => {
   };
 };
 
-export default function DriverTripScreen({ navigation }) {
+export default function DriverTripScreen({ navigation, route }) {
+  const routeBookingId = route?.params?.bookingId;
+  const routeVehicleId = route?.params?.vehicleId;
   const [bookingId, setBookingId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [assignedVehicleId, setAssignedVehicleId] = useState('');
@@ -118,6 +110,7 @@ export default function DriverTripScreen({ navigation }) {
   const [completedActions, setCompletedActions] = useState({});
   const [loadingAction, setLoadingAction] = useState('');
   const [accepting, setAccepting] = useState(false);
+  const [incomingAcceptedId, setIncomingAcceptedId] = useState(null);
   const watchRef = useRef(null);
 
   const socket = useMemo(() => io(socketOrigin, SOCKET_OPTIONS), []);
@@ -154,6 +147,12 @@ export default function DriverTripScreen({ navigation }) {
       applyTrip(buildTripFromPayload({
         ...statusData,
         bookingId: nextId,
+        vehicleId: pick(
+          statusData?.vehicleId,
+          statusData?.vehicle_id,
+          bookingData?.vehicle_id,
+          bookingData?.vehicleId,
+        ),
         passengerName: pick(
           statusData?.passengerName,
           statusData?.passenger_name,
@@ -197,16 +196,21 @@ export default function DriverTripScreen({ navigation }) {
   }, [bookingId, loadCurrentTrip]);
 
   useEffect(() => {
-    loadDriverSession().then(({ bookingId: b, driverId: d, vehicleId: v }) => {
-      if (b) {
-        setBookingId(b);
-        loadCurrentTrip(b);
+    loadDriverSession().then(async ({ bookingId: b, driverId: d, vehicleId: v }) => {
+      const initialBooking = routeBookingId || b;
+      if (initialBooking) {
+        setBookingId(String(initialBooking).toUpperCase());
+        loadCurrentTrip(initialBooking);
       }
-      const normalizedDriverId = sanitizeDriverId(d || v);
+      const normalizedDriverId = sanitizeDriverId(d);
       if (normalizedDriverId) setDriverId(normalizedDriverId);
-      if (v) setAssignedVehicleId(v);
+      let initialVehicle = routeVehicleId || v;
+      if (!initialVehicle && normalizedDriverId) {
+        initialVehicle = await resolveVehicleForDriver(normalizedDriverId);
+      }
+      if (initialVehicle) setAssignedVehicleId(String(initialVehicle).toUpperCase());
     });
-  }, [loadCurrentTrip]);
+  }, [loadCurrentTrip, routeBookingId, routeVehicleId]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -216,19 +220,30 @@ export default function DriverTripScreen({ navigation }) {
   }, [assignedVehicleId, bookingId, driverId]);
 
   useEffect(() => {
-    if (!driverId.trim()) return undefined;
     let mounted = true;
-    fetchPendingBookings(driverId)
-      .then((bookings) => {
+    const loadPending = async () => {
+      let vehicle = assignedVehicleId.trim();
+      if (!vehicle && driverId.trim()) {
+        vehicle = (await resolveVehicleForDriver(driverId)) || '';
+        if (vehicle && mounted) setAssignedVehicleId(String(vehicle).toUpperCase());
+      }
+      if (!vehicle) return;
+      try {
+        const bookings = await fetchPendingBookings(vehicle);
         if (!mounted || !bookings.length) return;
         const pending = buildTripFromPayload(bookings[0]);
-        if (pending) setIncomingAssignment(pending);
-      })
-      .catch((err) => append(`Pending bookings: ${apiErrorMessage(err)}`));
+        if (pending && pending.bookingId !== incomingAcceptedId) {
+          setIncomingAssignment(pending);
+        }
+      } catch (err) {
+        append(`Pending bookings: ${apiErrorMessage(err)}`);
+      }
+    };
+    loadPending();
     return () => {
       mounted = false;
     };
-  }, [append, driverId]);
+  }, [append, assignedVehicleId, driverId, incomingAcceptedId]);
 
   useEffect(() => {
     socket.emit('join_dispatch');
@@ -237,6 +252,7 @@ export default function DriverTripScreen({ navigation }) {
     const handleAssignment = (payload = {}) => {
       const nextTrip = buildTripFromPayload(payload);
       if (!nextTrip) return;
+      if (incomingAcceptedId && nextTrip.bookingId === incomingAcceptedId) return;
       const assignedVehicle = pick(nextTrip.vehicleId, payload.vehicleId, payload.vehicle_id, payload.vehicle_number);
       const myVehicle = assignedVehicleId.trim();
       if (myVehicle && assignedVehicle && String(assignedVehicle).toUpperCase() !== myVehicle.toUpperCase()) return;
@@ -267,7 +283,7 @@ export default function DriverTripScreen({ navigation }) {
       socket.off('vehicle_update', handleAssignment);
       socket.off('status_update', handleStatus);
     };
-  }, [applyTrip, assignedVehicleId, bookingId, driverId, socket]);
+  }, [applyTrip, assignedVehicleId, bookingId, driverId, incomingAcceptedId, socket]);
 
   useEffect(() => () => {
     socket.disconnect();
@@ -302,26 +318,57 @@ export default function DriverTripScreen({ navigation }) {
   };
 
   const acceptIncoming = async () => {
-    if (!incomingAssignment?.bookingId || !driverId.trim()) return;
+    if (!incomingAssignment?.bookingId || accepting) return;
+    if (incomingAcceptedId === incomingAssignment.bookingId) return;
+
+    let vehicleForAccept = String(
+      incomingAssignment.vehicleId || assignedVehicleId || '',
+    ).trim();
+    if (!vehicleForAccept && driverId.trim()) {
+      vehicleForAccept = (await resolveVehicleForDriver(driverId)) || driverId.trim();
+    }
+    if (!vehicleForAccept) {
+      Alert.alert(
+        'Vehicle ID missing',
+        'Enter your Driver ID on this screen first, or ensure your vehicle (CT-xxx) is linked in the system.',
+      );
+      return;
+    }
+
     setAccepting(true);
+    const acceptBid = incomingAssignment.bookingId;
     try {
-      const nextBookingId = incomingAssignment.bookingId;
-      const result = await acceptBooking({ bookingId: incomingAssignment.bookingId, vehicleId: driverId.trim() });
+      const result = await acceptBooking({
+        bookingId: acceptBid,
+        vehicleId: vehicleForAccept,
+        driverId: driverId.trim(),
+      });
       const nextTrip = buildTripFromPayload(result?.assignment || incomingAssignment);
+      const resolvedVehicle = String(
+        nextTrip?.vehicleId || result?.assignment?.vehicleId || vehicleForAccept,
+      ).toUpperCase();
+      if (resolvedVehicle) setAssignedVehicleId(resolvedVehicle);
+
       const resolvedDriverId = sanitizeDriverId(
-        result?.assignment?.driverId ||
-        result?.assignment?.driver_id ||
-        driverId
+        result?.assignment?.driverId || result?.assignment?.driver_id || driverId,
       );
       if (resolvedDriverId) setDriverId(resolvedDriverId);
-      setBookingId(nextBookingId);
+
+      setBookingId(acceptBid);
       applyTrip(nextTrip);
+      setIncomingAcceptedId(acceptBid);
+      setIncomingAssignment((prev) =>
+        prev ? { ...prev, status: 'Accepted', accepted: true } : prev,
+      );
+
+      await saveDriverSession(acceptBid, resolvedDriverId || driverId, resolvedVehicle);
+
       socket.emit('status_update', {
-        bookingId: nextBookingId,
-        booking_id: nextBookingId,
-        vehicleId: nextTrip?.vehicleId || assignedVehicleId || driverId.trim(),
-        vehicle_number: nextTrip?.vehicleId || assignedVehicleId || driverId.trim(),
-        driverId: driverId.trim(),
+        bookingId: acceptBid,
+        booking_id: acceptBid,
+        vehicleId: resolvedVehicle,
+        vehicle_number: resolvedVehicle,
+        driverId: (resolvedDriverId || driverId).trim(),
         passengerName: nextTrip?.passengerName,
         pickupAddress: nextTrip?.pickup,
         destination: nextTrip?.destination,
@@ -329,8 +376,7 @@ export default function DriverTripScreen({ navigation }) {
         status: 'Driver Assigned',
         updated_at: new Date().toISOString(),
       });
-      setIncomingAssignment(null);
-      append(`Accepted assignment ${incomingAssignment.bookingId}.`);
+      append(`Accepted assignment ${acceptBid}.`);
     } catch (err) {
       Alert.alert('Accept failed', apiErrorMessage(err));
     } finally {
@@ -338,11 +384,21 @@ export default function DriverTripScreen({ navigation }) {
     }
   };
 
+  const dismissIncoming = () => {
+    setIncomingAssignment(null);
+    setIncomingAcceptedId(null);
+  };
+
   const runAction = async (action) => {
     if (!requireIds() || loadingAction) return;
+    const vehicleForApi = assignedVehicleId.trim();
+    if (!vehicleForApi) {
+      Alert.alert('Vehicle ID missing', 'Load a booking with an assigned Vehicle ID (CT-xxx) first.');
+      return;
+    }
     setLoadingAction(action.key);
     try {
-      const { data } = await action.request(bookingId.trim(), driverId.trim());
+      const { data } = await action.request(bookingId.trim(), vehicleForApi);
       const status = data?.status || data?.assignment || {};
       setCompletedActions((prev) => ({ ...prev, [action.key]: true }));
       emitStatus(action.status, {
@@ -403,7 +459,7 @@ export default function DriverTripScreen({ navigation }) {
     try {
       await driverClient.put('/otp/driver-location', {
         bookingId: bookingId.trim(),
-        vehicleId: driverId.trim(),
+        vehicleId: assignedVehicleId.trim() || driverId.trim(),
         lat: coords.latitude,
         lng: coords.longitude,
       });
@@ -459,7 +515,9 @@ export default function DriverTripScreen({ navigation }) {
   };
 
   const actionDone = (key) => completedActions[key] === true;
-  const visibleTrip = activeTrip || (bookingId ? { bookingId, status: 'Ready for sync' } : null);
+  const visibleTrip = activeTrip || (bookingId ? { bookingId, status: 'pending' } : null);
+  const tripBadge = statusBadgeColor(visibleTrip?.status);
+  const tripStatusLabel = formatTaskStatus(visibleTrip?.status);
 
   return (
     <View style={styles.outer}>
@@ -502,11 +560,30 @@ export default function DriverTripScreen({ navigation }) {
             <Info label="Destination" value={incomingAssignment?.destination} />
             <Info label="Pickup time" value={formatPickupTime(incomingAssignment?.pickupTime)} />
             <View style={styles.assignmentActions}>
-              <TouchableOpacity style={styles.declineBtn} onPress={() => setIncomingAssignment(null)} disabled={accepting}>
-                <Text style={styles.declineTxt}>Dismiss</Text>
+              <TouchableOpacity
+                style={styles.declineBtn}
+                onPress={dismissIncoming}
+                disabled={accepting}
+              >
+                <Text style={styles.declineTxt}>
+                  {incomingAcceptedId === incomingAssignment?.bookingId ? 'Close' : 'Dismiss'}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.acceptBtn} onPress={acceptIncoming} disabled={accepting}>
-                {accepting ? <ActivityIndicator color="#08100a" /> : <Text style={styles.acceptTxt}>Accept</Text>}
+              <TouchableOpacity
+                style={[
+                  styles.acceptBtn,
+                  incomingAcceptedId === incomingAssignment?.bookingId && styles.acceptBtnDone,
+                ]}
+                onPress={acceptIncoming}
+                disabled={accepting || incomingAcceptedId === incomingAssignment?.bookingId}
+              >
+                {accepting ? (
+                  <ActivityIndicator color="#08100a" />
+                ) : (
+                  <Text style={styles.acceptTxt}>
+                    {incomingAcceptedId === incomingAssignment?.bookingId ? 'Accepted ✓' : 'Accept'}
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -546,11 +623,14 @@ export default function DriverTripScreen({ navigation }) {
                 <Text style={styles.tripEyebrow}>Persistent Trip Card</Text>
                 <Text style={styles.tripBooking}>{visibleTrip.bookingId}</Text>
               </View>
-              <View style={styles.statusBadge}>
-                <Text style={styles.statusBadgeText}>{visibleTrip.status || 'Assigned'}</Text>
+              <View style={[styles.statusBadge, { backgroundColor: tripBadge.bg }]}>
+                <Text style={[styles.statusBadgeText, { color: tripBadge.text }]}>
+                  {tripStatusLabel}
+                </Text>
               </View>
             </View>
-            <Info label="Driver ID" value={driverId || 'DR-101'} />
+            <Info label="Driver ID" value={driverId || '—'} />
+            <Info label="Vehicle ID" value={assignedVehicleId || '—'} />
             <Info label="Passenger" value={visibleTrip.passengerName || 'Passenger'} />
             <Info label="Pickup" value={visibleTrip.pickup || 'Pickup pending'} />
             <Info label="Destination" value={visibleTrip.destination || 'Airport terminal'} />
@@ -594,7 +674,7 @@ export default function DriverTripScreen({ navigation }) {
               <ActivityIndicator color="#000" />
             ) : (
               <Text style={[styles.btnTxt, { color: '#000' }]}>
-                {actionDone('verifyPassenger') ? '✅ Done: Passenger verified' : '3 - Verify Passenger'}
+                {actionDone('verifyPassenger') ? 'Verified' : '3 - Verify Passenger'}
               </Text>
             )}
           </TouchableOpacity>
@@ -648,7 +728,7 @@ function ActionButton({ action, index, done, loading, disabled, onPress, airport
         <ActivityIndicator color="#08110a" />
       ) : (
         <Text style={[styles.btnTxt, done && styles.btnTxtDone, disabled && !done && styles.btnTxtDisabled]}>
-          {done ? `✅ ${action.done} (Locked)` : `${index} - ${action.title}`}
+          {done ? `Done — ${action.done.replace(/^Done:\s*/i, '')}` : `${index} - ${action.title}`}
         </Text>
       )}
     </TouchableOpacity>
@@ -762,5 +842,6 @@ const styles = StyleSheet.create({
   declineBtn: { flex: 1, paddingVertical: 16, borderRadius: 14, borderWidth: 1, borderColor: '#ef4444', alignItems: 'center' },
   declineTxt: { color: '#ef4444', fontWeight: '900', fontSize: 16 },
   acceptBtn: { flex: 1, paddingVertical: 16, borderRadius: 14, backgroundColor: '#47d361', alignItems: 'center' },
+  acceptBtnDone: { backgroundColor: '#9CA3AF' },
   acceptTxt: { color: '#08100a', fontWeight: '900', fontSize: 16 },
 });

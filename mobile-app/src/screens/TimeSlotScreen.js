@@ -223,11 +223,12 @@ const TimeSlotScreen = ({ navigation, route }) => {
       navigation.navigate('BookingConfirm', {
         ...params,
         selectedDate,
-        selectedTimeSlot:  formatSlotTime(selectedSlot.slot_time),
-        selectedSlotId:    selectedSlot.id,
+        pickupTimeIso: selectedSlot.slot_time,
+        selectedTimeSlot: formatSlotTime(selectedSlot.slot_time),
+        selectedSlotId: selectedSlot.id,
         slotDetails: {
-          slotTime:        selectedSlot.slot_time,
-          locationName:    selectedSlot.location_name,
+          slotTime: selectedSlot.slot_time,
+          locationName: selectedSlot.location_name,
           locationAddress: selectedSlot.location_address,
         },
       });

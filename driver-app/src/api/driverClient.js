@@ -46,12 +46,34 @@ export async function fetchPendingBookings(vehicleId) {
   return data?.bookings || [];
 }
 
-export async function acceptBooking({ bookingId, vehicleId }) {
+export async function fetchDriverTasks(driverId) {
+  const id = String(driverId || '').trim();
+  if (!id) throw new Error('Driver ID missing');
+  const { data } = await client.get(`/otp/driver-tasks/${encodeURIComponent(id)}`);
+  return data?.tasks || [];
+}
+
+export async function acceptBooking({ bookingId, vehicleId, driverId }) {
   const { data } = await client.post('/otp/accept-booking', {
     bookingId: String(bookingId || '').trim(),
     vehicleId: String(vehicleId || '').trim(),
+    driverId: String(driverId || '').trim(),
   });
   return data;
+}
+
+/** Resolve CT-xxx for a driver id (DR-xxx) from assignments or drivers table */
+export async function resolveVehicleForDriver(driverId) {
+  const id = String(driverId || '').trim();
+  if (!id) return null;
+  try {
+    const tasks = await fetchDriverTasks(id);
+    const fromTask = tasks.find((t) => t.vehicleId)?.vehicleId;
+    if (fromTask) return String(fromTask).toUpperCase();
+  } catch (_e) {
+    /* fall through */
+  }
+  return null;
 }
 
 export default client;

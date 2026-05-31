@@ -1,58 +1,28 @@
 // ============================================================
-// FILE: mobile-app/src/screens/ConfirmationScreen.js
-// SCREEN 7 — CONFIRMATION + QR CODE
-// ============================================================
-// Slot successfully book ho gaya!
-// QR Code dikhao — yeh boarding pass ka kaam karega
-// Vehicle details dikhao
-// Pickup time + location dikhao
-// Share / Download option
+// Confirmation — pre-trip (track vehicle) OR boarding pass (at airport)
 // ============================================================
 
-import React, { useRef } from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Share,        // Native share sheet
+  Share,
   Alert,
   Dimensions,
 } from 'react-native';
-
 import { useTranslation } from 'react-i18next';
-import QRCodeBox from '../components/QRCodeBox';
+import QRCode from 'react-native-qrcode-svg';
+import { formatPickupDate, formatPickupTime, getPickupTimeFromParams } from '../utils/slotTime';
+import { clearPassengerTrip, savePassengerTrip } from '../services/passengerTripStorage';
 import theme from '../theme';
 
 const { width } = Dimensions.get('window');
 
-// ============================================================
-// TIME FORMAT HELPERS
-// ============================================================
-const formatTime = (dateString) => {
-  if (!dateString) return '--';
-  let date = new Date(dateString);
-  if (isNaN(date.getTime())) date = new Date(dateString.replace(' ', 'T'));
-  if (isNaN(date.getTime())) return String(dateString);
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit', minute: '2-digit', hour12: true,
-  });
-};
-
-const formatDate = (dateString) => {
-  if (!dateString) return '--';
-  let date = new Date(dateString);
-  if (isNaN(date.getTime())) date = new Date(dateString.replace(' ', 'T'));
-  if (isNaN(date.getTime())) return String(dateString);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric',
-    month: 'long', day: 'numeric',
-  });
-};
-
 const pick = (...values) =>
-  values.find((value) => value != null && String(value).trim() !== '' && String(value).trim() !== '--');
+  values.find((v) => v != null && String(v).trim() !== '' && String(v).trim() !== '--');
 
 const pickupNameFrom = (value) => {
   if (!value) return null;
@@ -60,570 +30,342 @@ const pickupNameFrom = (value) => {
   return pick(value.name, value.label, value.locationName, value.pickupLocation);
 };
 
-// ============================================================
-// INFO ROW COMPONENT — Reusable detail row
-// ============================================================
+const normalizeStatus = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+
 const InfoRow = ({ icon, label, value, highlight }) => (
   <View style={styles.infoRow}>
     <Text style={styles.infoIcon}>{icon}</Text>
     <View style={styles.infoContent}>
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={[styles.infoValue, highlight && styles.infoValueHighlight]}>
-        {value}
-      </Text>
+      <Text style={[styles.infoValue, highlight && styles.infoValueHighlight]}>{value}</Text>
     </View>
   </View>
 );
 
-// ============================================================
-// MAIN COMPONENT
-// ============================================================
 const ConfirmationScreen = ({ navigation, route }) => {
   const { t } = useTranslation();
-
-  // ── ROUTE PARAMS ─────────────────────────────────────────
-  // Screen 6 (SlotBooking) se yeh sab aaya
+  const params = route?.params || {};
   const {
     bookingId,
     airline,
     bookingData,
-    confirmation, // Backend se aaya: { vehicleNumber, slotTime, locationName, qrCode }
-  } = route.params || {};
+    confirmation = {},
+    statusData,
+    isBoardingPass: forceBoarding,
+  } = params;
 
-  const pickupLocation = pick(
-    confirmation?.locationName,
-    confirmation?.pickupLocation,
-    pickupNameFrom(route?.params?.pickupLocation),
-    route?.params?.pickupLocationName,
-  ) || '--';
-  const destinationTerminal = pick(
-    confirmation?.destinationTerminal,
-    route?.params?.destinationTerminal,
-    bookingData?.terminal,
-  ) || '--';
-  const slotTime = pick(
-    confirmation?.slotTime,
-    confirmation?.slot_time,
-    route?.params?.slotDetails?.slotTime,
-    route?.params?.selectedTimeSlot,
-  );
-  const vehicleNumber = pick(confirmation?.vehicleNumber, confirmation?.vehicleId, confirmation?.vehicle_id) || '--';
+  const statusNorm = normalizeStatus(statusData?.status || confirmation?.status);
+  const isBoardingPass =
+    forceBoarding === true ||
+    confirmation?.reachedAirport === true ||
+    statusNorm === 'at_airport' ||
+    statusNorm.includes('at_airport');
+
+  const pickupLocation =
+    pick(
+      confirmation?.locationName,
+      confirmation?.pickupLocation,
+      pickupNameFrom(params?.pickupLocation),
+      params?.pickupLocationName,
+      statusData?.pickupLocation,
+    ) || '--';
+
+  const destinationTerminal =
+    pick(
+      confirmation?.destinationTerminal,
+      params?.destinationTerminal,
+      bookingData?.terminal,
+      statusData?.destinationTerminal,
+    ) || '--';
+
+  const slotTimeRaw = getPickupTimeFromParams({ ...params, confirmation, statusData });
+  const slotTimeLabel = formatPickupTime(slotTimeRaw);
+  const slotDateLabel = formatPickupDate(slotTimeRaw);
+
+  const vehicleNumber =
+    pick(confirmation?.vehicleNumber, confirmation?.vehicleId, confirmation?.vehicle_id, statusData?.vehicleId) ||
+    '--';
+
   const boardingPassData = pick(
     confirmation?.barcodeData,
     confirmation?.barcode_data,
-    confirmation?.proof_qr_code,
     confirmation?.qrCode,
+    statusData?.barcodeData,
+    statusData?.barcode_data,
   );
 
-  // QR Code ref — save ke liye
-  const qrRef = useRef(null);
+  const qrData = useMemo(() => {
+    if (boardingPassData) {
+      if (typeof boardingPassData === 'string') {
+        try {
+          return JSON.stringify(JSON.parse(boardingPassData));
+        } catch {
+          return boardingPassData;
+        }
+      }
+      try {
+        return JSON.stringify(boardingPassData);
+      } catch {
+        return String(bookingId);
+      }
+    }
+    return JSON.stringify({
+      type: 'digital_boarding_pass',
+      bookingId,
+      vehicle: vehicleNumber,
+      time: slotTimeRaw,
+      location: pickupLocation,
+      destinationTerminal,
+    });
+  }, [boardingPassData, bookingId, destinationTerminal, pickupLocation, slotTimeRaw, vehicleNumber]);
 
-  // ── QR CODE DATA ─────────────────────────────────────────
-  // Backend se aaya qrCode string
-  // Isme sab details hain: bookingId, vehicle, time, location
-  const qrData = boardingPassData || JSON.stringify({
-    bookingId,
-    vehicle: vehicleNumber,
-    time: slotTime,
-    location: pickupLocation,
-    destinationTerminal,
-  });
-
-  // ── SHARE HANDLER ────────────────────────────────────────
   const handleShare = async () => {
     try {
-      // Native Share sheet khulega
       await Share.share({
         message:
-          `🏙️ City Terminal Booking Confirmed!\n\n` +
-          `📋 Booking ID: ${bookingId}\n` +
-          `✈️ Flight: ${bookingData?.flightNumber}\n` +
-          `📍 Pickup: ${pickupLocation}\n` +
-          `🕐 Time: ${formatTime(slotTime)}\n` +
-          `🚗 Vehicle: ${vehicleNumber}\n\n` +
-          `Please show QR code at pickup point.`,
+          `City Terminal — ${isBoardingPass ? 'Boarding Pass' : 'Booking Confirmed'}\n\n` +
+          `Booking: ${bookingId}\n` +
+          `Pickup: ${pickupLocation}\n` +
+          `Time: ${slotTimeLabel}\n` +
+          `Vehicle: ${vehicleNumber}\n` +
+          `Terminal: ${destinationTerminal}`,
         title: t('confirmation.successTitle'),
       });
-    } catch (error) {
+    } catch {
       Alert.alert(t('common.error'), t('slotBooking.tryLater'));
     }
   };
 
-  // ── HOME HANDLER ─────────────────────────────────────────
-  const handleGoHome = () => {
-    // Stack ko reset karo — sab screens hata do
-    // Pehle screen (Splash ya Language) pe wapas
+  const handleGoHome = async () => {
+    if (isBoardingPass) {
+      await clearPassengerTrip();
+    }
     navigation.reset({
       index: 0,
       routes: [{ name: 'LanguageSelect' }],
     });
   };
 
-  // ============================================================
-  // UI RENDER
-  // ============================================================
+  const goToLiveTracking = async () => {
+    const tripParams = {
+      ...params,
+      bookingId,
+      airline,
+      bookingData,
+      statusData,
+      confirmation: {
+        ...confirmation,
+        vehicleNumber,
+        vehicleId: vehicleNumber,
+        locationName: pickupLocation,
+        pickupLocation,
+        destinationTerminal,
+        slotTime: slotTimeRaw,
+      },
+    };
+    await savePassengerTrip({
+      bookingId,
+      params: tripParams,
+      phase: 'tracking',
+      status: statusData?.status || confirmation?.status,
+      vehicleId: vehicleNumber,
+    });
+    navigation.navigate('LiveTracking', tripParams);
+  };
+
   return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={styles.contentContainer}
-    >
-
-      {/* ── SUCCESS HEADER ── */}
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.contentContainer}>
       <View style={styles.successHeader}>
-
-        {/* Green checkmark circle */}
-        <View style={styles.successCircle}>
-          <Text style={styles.successIcon}>✓</Text>
+        <View style={[styles.successCircle, isBoardingPass && styles.successCircleBoarding]}>
+          <Text style={styles.successIcon}>{isBoardingPass ? '✈' : '✓'}</Text>
         </View>
-
-        <Text style={styles.successTitle}>{t('confirmation.successTitle')}</Text>
-        <Text style={styles.successSubtitle}>
-          {t('confirmation.successSubtitle')}
+        <Text style={styles.successTitle}>
+          {isBoardingPass ? 'Boarding Pass Ready' : t('confirmation.successTitle')}
         </Text>
-
-        {/* Booking ID badge */}
+        <Text style={styles.successSubtitle}>
+          {isBoardingPass
+            ? 'Your luggage has reached the airport terminal. Use the QR below at check-in.'
+            : t('confirmation.successSubtitle')}
+        </Text>
         <View style={styles.bookingBadge}>
           <Text style={styles.bookingBadgeLabel}>{t('confirmation.bookingId')}</Text>
           <Text style={styles.bookingBadgeId}>{bookingId}</Text>
         </View>
-
       </View>
 
-      {/* ── QR CODE SECTION ── */}
       <View style={styles.qrSection}>
-
-        <Text style={styles.sectionTitle}>{t('confirmation.qrPass')}</Text>
-        <Text style={styles.sectionSubtitle}>
-          {t('confirmation.qrSubtitle')}
+        <Text style={styles.sectionTitle}>
+          {isBoardingPass ? 'Digital Boarding Pass QR' : t('confirmation.qrPass')}
         </Text>
-
-        {/* QR Code card */}
+        <Text style={styles.sectionSubtitle}>
+          {isBoardingPass
+            ? 'Show this at the airport counter — same as your profile barcode'
+            : t('confirmation.qrSubtitle')}
+        </Text>
         <View style={styles.qrCard}>
-
-          {/* QR Code component */}
-          {/* qrData = booking details as JSON string */}
-          {/* Scanner is QR ko padhke sab details nikaal lega */}
-          <QRCodeBox value={qrData} size={width * 0.55} />
-
-          {/* QR Code ke neeche flight info */}
+          <View style={styles.qrWhite}>
+            <QRCode value={qrData} size={Math.min(width * 0.62, 240)} backgroundColor="#FFFFFF" color="#0A0A0B" />
+          </View>
           <View style={styles.qrInfo}>
             <Text style={styles.qrFlightNo}>
-              {airline?.flag} {bookingData?.flightNumber}
+              {airline?.flag ? `${airline.flag} ` : ''}
+              {bookingData?.flightNumber || confirmation?.flightNumber || bookingId}
             </Text>
-            <Text style={styles.qrDestination}>
-              → {bookingData?.destination}
-            </Text>
+            <Text style={styles.qrDestination}>→ {bookingData?.destination || destinationTerminal}</Text>
+            <Text style={styles.qrVehicle}>Vehicle {vehicleNumber}</Text>
           </View>
-
         </View>
-
       </View>
 
-      {/* ── PICKUP DETAILS ── */}
       <View style={styles.detailsSection}>
-
         <Text style={styles.sectionTitle}>{t('confirmation.pickupDetails')}</Text>
-
         <View style={styles.detailsCard}>
-
-          <InfoRow
-            icon="📍"
-            label={t('confirmation.pickupLocation')}
-            value={pickupLocation}
-            highlight={true}
-          />
-
+          <InfoRow icon="📍" label={t('confirmation.pickupLocation')} value={pickupLocation} highlight />
           <View style={styles.divider} />
-
-          <InfoRow
-            icon="🕐"
-            label={t('confirmation.pickupTime')}
-            value={formatTime(slotTime)}
-            highlight={true}
-          />
-
+          <InfoRow icon="🕐" label={t('confirmation.pickupTime')} value={slotTimeLabel} highlight />
           <View style={styles.divider} />
-
-          <InfoRow
-            icon="📅"
-            label={t('confirmation.date')}
-            value={formatDate(slotTime)}
-          />
-
+          <InfoRow icon="📅" label={t('confirmation.date')} value={slotDateLabel} />
           <View style={styles.divider} />
-
-          <InfoRow
-            icon="🚗"
-            label={t('confirmation.vehicleNumber')}
-            value={vehicleNumber}
-          />
-
+          <InfoRow icon="🚗" label={t('confirmation.vehicleNumber')} value={vehicleNumber} />
           <View style={styles.divider} />
-
-          <InfoRow
-            icon="AIR"
-            label="Destination Terminal"
-            value={destinationTerminal}
-          />
-
+          <InfoRow icon="✈️" label="Destination Terminal" value={destinationTerminal} />
           <View style={styles.divider} />
-
           <InfoRow
-            icon="OTP"
-            label="Pickup OTP"
-            value={confirmation?.pickupOtp || confirmation?.pickup_otp || '--'}
-            highlight={true}
-          />
-
-          <View style={styles.divider} />
-
-          <InfoRow
-            icon="DR"
+            icon="👤"
             label="Driver"
             value={confirmation?.driverName || confirmation?.driver_name || 'City Terminal Driver'}
           />
-
-          <View style={styles.divider} />
-
-          <InfoRow
-            icon="✈️"
-            label={t('confirmation.yourFlight')}
-            value={`${bookingData?.flightNumber} — ${t('confirmation.departs')} ${bookingData?.departureTime}`}
-          />
-
         </View>
-
       </View>
 
-      {/* ── INSTRUCTIONS ── */}
-      <View style={styles.instructionsSection}>
-
-        <Text style={styles.sectionTitle}>{t('confirmation.whatNext')}</Text>
-
-        <View style={styles.instructionsList}>
-
-          {[
-            { step: '1', text: 'Be at the pickup location 10 mins before your slot time' },
-            { step: '2', text: 'Show this QR code to the vehicle driver' },
-            { step: '3', text: 'Your luggage will be checked in at the terminal' },
-            { step: '4', text: 'Vehicle will take you directly to departure hall' },
-          ].map((item) => (
-            <View key={item.step} style={styles.instructionItem}>
-              <View style={styles.stepCircle}>
-                <Text style={styles.stepNumber}>{item.step}</Text>
-              </View>
-              <Text style={styles.instructionText}>{item.text}</Text>
-            </View>
-          ))}
-
-        </View>
-
-      </View>
-
-      {/* ── ACTION BUTTONS ── */}
       <View style={styles.actions}>
-
-        {/* Share button */}
         <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
           <Text style={styles.shareButtonText}>📤 {t('confirmation.shareBooking')}</Text>
-
-        </TouchableOpacity>
-        <TouchableOpacity
-  style={styles.trackButton}
-  onPress={() => navigation.navigate('LiveTracking', {
-    bookingId,
-    airline,
-    bookingData,
-    ...route?.params,
-    confirmation: {
-      ...(confirmation || {}),
-      vehicleNumber,
-      vehicleId: vehicleNumber,
-      locationName: pickupLocation,
-      pickupLocation,
-      destinationTerminal,
-      slotTime,
-    },
-  })}
->
-  <Text style={styles.trackButtonText}>🚗 {t('confirmation.trackVehicle')}</Text>
-</TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.chatButton}
-          onPress={() =>
-            navigation.navigate('ChatSupport', {
-              bookingId,
-            })
-          }
-        >
-          <Text style={styles.chatButtonText}>💬 Chat Support</Text>
         </TouchableOpacity>
 
-        {/* Home button */}
+        {!isBoardingPass ? (
+          <TouchableOpacity style={styles.trackButton} onPress={goToLiveTracking}>
+            <Text style={styles.trackButtonText}>🚗 {t('confirmation.trackVehicle')}</Text>
+          </TouchableOpacity>
+        ) : null}
+
         <TouchableOpacity style={styles.homeButton} onPress={handleGoHome}>
           <Text style={styles.homeButtonText}>{t('confirmation.backHome')}</Text>
         </TouchableOpacity>
-
       </View>
-
     </ScrollView>
   );
 };
 
-// ============================================================
-// STYLES
-// ============================================================
 const styles = StyleSheet.create({
-
-  container: {
-    flex: 1,
-    backgroundColor: '#0F0F10',
-  },
-
-  contentContainer: {
-    paddingBottom: 40,
-  },
-
-  // Success header — green background
+  container: { flex: 1, backgroundColor: '#0F0F10' },
+  contentContainer: { paddingBottom: 48 },
   successHeader: {
     backgroundColor: '#121212',
-    paddingTop: 80,
-    paddingBottom: 40,
+    paddingTop: 72,
+    paddingBottom: 32,
     paddingHorizontal: 24,
     alignItems: 'center',
   },
-
   successCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#009A44',
+    backgroundColor: theme.colors.careemGreen,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
-    shadowColor: '#009A44',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    marginBottom: 18,
   },
-
-  successIcon: {
-    fontSize: 40,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-
-  successTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-
+  successCircleBoarding: { backgroundColor: '#163A1C', borderWidth: 2, borderColor: theme.colors.careemGreen },
+  successIcon: { fontSize: 36, color: '#08100A', fontWeight: '900' },
+  successTitle: { fontSize: 26, fontWeight: '900', color: '#FFFFFF', textAlign: 'center' },
   successSubtitle: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.75)',
     textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 20,
+    lineHeight: 21,
+    marginTop: 8,
+    marginBottom: 18,
+    paddingHorizontal: 12,
   },
-
-  // Booking ID badge
   bookingBadge: {
-    backgroundColor: 'rgba(239,51,64,0.2)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(71,211,97,0.12)',
+    borderRadius: 14,
     paddingHorizontal: 20,
     paddingVertical: 12,
-    alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(239,51,64,0.55)',
+    borderColor: 'rgba(71,211,97,0.35)',
   },
-
   bookingBadgeLabel: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 1,
     textTransform: 'uppercase',
     marginBottom: 4,
   },
-
-  bookingBadgeId: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: 3,
-  },
-
-  // Sections
-  qrSection: {
-    padding: 24,
-    alignItems: 'center',
-  },
-
-  detailsSection: {
-    paddingHorizontal: 24,
-    marginBottom: 24,
-  },
-
-  instructionsSection: {
-    paddingHorizontal: 24,
-    marginBottom: 24,
-  },
-
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#F8FAFC',
-    marginBottom: 4,
-  },
-
-  sectionSubtitle: {
-    fontSize: 13,
-    color: '#A7B0C0',
-    marginBottom: 16,
-  },
-
-  // QR Card
+  bookingBadgeId: { fontSize: 22, fontWeight: '900', color: '#FFFFFF', letterSpacing: 2 },
+  qrSection: { padding: 24, alignItems: 'center' },
+  detailsSection: { paddingHorizontal: 24, marginBottom: 20 },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#F8FAFC', marginBottom: 4 },
+  sectionSubtitle: { fontSize: 13, color: '#94A3B8', marginBottom: 16, textAlign: 'center', lineHeight: 19 },
   qrCard: {
     backgroundColor: '#191A1E',
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: 22,
+    padding: 22,
     alignItems: 'center',
-    shadowColor: '#EF3340',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 5,
     width: '100%',
+    borderWidth: 1,
+    borderColor: '#2E3138',
   },
-
-  qrInfo: {
-    marginTop: 20,
-    alignItems: 'center',
+  qrWhite: {
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 18,
   },
-
-  qrFlightNo: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#F8FAFC',
-  },
-
-  qrDestination: {
-    fontSize: 13,
-    color: '#CBD5E1',
-    marginTop: 4,
-  },
-
-  // Details card
+  qrInfo: { marginTop: 18, alignItems: 'center', gap: 4 },
+  qrFlightNo: { fontSize: 17, fontWeight: '800', color: '#F8FAFC' },
+  qrDestination: { fontSize: 13, color: '#94A3B8' },
+  qrVehicle: { fontSize: 13, color: theme.colors.careemGreen, fontWeight: '800', marginTop: 4 },
   detailsCard: {
     backgroundColor: '#191A1E',
     borderRadius: 16,
     padding: 16,
-    shadowColor: '#EF3340',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
     marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#2E3138',
   },
-
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    gap: 12,
-  },
-
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 12 },
   infoIcon: { fontSize: 20, width: 28, textAlign: 'center' },
-
   infoContent: { flex: 1 },
-
   infoLabel: {
     fontSize: 11,
     color: '#94A3B8',
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 3,
   },
-
-  infoValue: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#F8FAFC',
-  },
-
-  infoValueHighlight: {
-    color: '#7EE08D',
-    fontWeight: '700',
-    fontSize: 16,
-  },
-
-  divider: {
-    height: 0.5,
-    backgroundColor: '#2E3138',
-  },
-
-  // Instructions
-  instructionsList: {
-    marginTop: 12,
-    gap: 12,
-  },
-
-  instructionItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: '#191A1E',
-    borderRadius: 12,
-    padding: 14,
-  },
-
-  stepCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#009A44',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-
-  stepNumber: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-
-  instructionText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#E2E8F0',
-    lineHeight: 18,
-  },
-
-  // Action buttons
-  actions: {
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-
+  infoValue: { fontSize: 15, fontWeight: '600', color: '#F8FAFC' },
+  infoValueHighlight: { color: theme.colors.careemGreen, fontWeight: '800', fontSize: 16 },
+  divider: { height: 0.5, backgroundColor: '#2E3138' },
+  actions: { paddingHorizontal: 24, gap: 12 },
   shareButton: {
+    backgroundColor: theme.colors.careemGreen,
+    borderRadius: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  shareButtonText: { fontSize: 16, fontWeight: '800', color: '#08100A' },
+  trackButton: {
     backgroundColor: '#EF3340',
     borderRadius: 16,
     paddingVertical: 18,
     alignItems: 'center',
   },
-
-  shareButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-
+  trackButtonText: { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
   homeButton: {
     backgroundColor: '#191A1E',
     borderRadius: 16,
@@ -632,37 +374,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#2E3138',
   },
-
-  homeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#CBD5E1',
-  },
-  trackButton: {
-    backgroundColor: '#009A44',
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  trackButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  chatButton: {
-    backgroundColor: '#191A1E',
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#2E3138',
-  },
-  chatButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#F8FAFC',
-  },
-
+  homeButtonText: { fontSize: 16, fontWeight: '700', color: '#CBD5E1' },
 });
 
 export default ConfirmationScreen;

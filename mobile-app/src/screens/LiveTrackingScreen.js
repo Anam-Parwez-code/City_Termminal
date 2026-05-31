@@ -18,8 +18,11 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { io } from 'socket.io-client';
+import QRCode from 'react-native-qrcode-svg';
 import TripMap from '../components/TripMap';
 import apiService, { getSocketBaseUrl } from '../services/apiService';
+import { savePassengerTrip } from '../services/passengerTripStorage';
+import { formatPickupTime, getPickupTimeFromParams } from '../utils/slotTime';
 
 const { height } = Dimensions.get('window');
 
@@ -122,7 +125,27 @@ const LiveTrackingScreen = ({ navigation, route }) => {
   const bookingId   = params.bookingId || params.bookingData?.bookingId || params.bookingData?.booking_id;
   const confirmation = params.confirmation || {};
 
-  const [statusData,   setStatusData]   = useState(params.statusData || null);
+  const buildInitialStatus = () => {
+    const c = confirmation || {};
+    const base = params.statusData || {};
+    return {
+      ...base,
+      status: base.status || c.status || 'dispatched',
+      vehicleId: base.vehicleId || base.vehicle_id || c.vehicleId || c.vehicleNumber,
+      vehicle_id: base.vehicle_id || c.vehicle_id || c.vehicleId,
+      driverName: base.driverName || base.driver_name || c.driverName || c.driver_name,
+      driverPhone: base.driverPhone || base.driver_phone || c.driverPhone || c.driver_phone,
+      pickupLocation: base.pickupLocation || base.pickup_location || c.pickupLocation || c.locationName,
+      pickup_location: base.pickup_location || c.pickup_location || c.locationName,
+      destinationTerminal: base.destinationTerminal || base.destination_terminal || c.destinationTerminal,
+      destination_terminal: base.destination_terminal || c.destinationTerminal,
+      slotTime: getPickupTimeFromParams(params) || base.slotTime || base.slot_time,
+      slot_time: getPickupTimeFromParams(params) || base.slot_time,
+      barcodeData: base.barcodeData || base.barcode_data || c.barcodeData || c.barcode_data,
+    };
+  };
+
+  const [statusData, setStatusData] = useState(buildInitialStatus);
   const [driverCoords, setDriverCoords] = useState(null);
   const [pushNotify,   setPushNotify]   = useState({ visible: false, title: '', body: '' });
 
@@ -188,16 +211,17 @@ const LiveTrackingScreen = ({ navigation, route }) => {
       ? rawDriver
       : null;
 
-  const isAtPickup    = currentStage.key === 'arrived_pickup';
-  const isBarcodeStage = normalizeStatus(statusData?.status) === 'barcode_issued';
-  const isAtAirport   = currentStage.key === 'at_airport';
-  const slotTime = pick(
-    statusData?.slotTime,
-    statusData?.slot_time,
-    confirmation.slotTime,
-    params?.slotDetails?.slotTime,
-    params?.selectedTimeSlot,
-  );
+  const isAtPickup = currentStage.key === 'arrived_pickup';
+  const normStatus = normalizeStatus(statusData?.status);
+  const isBarcodeStage = normStatus === 'barcode_issued';
+  const isVerifiedPassenger =
+    isBarcodeStage ||
+    normStatus === 'at_airport' ||
+    statusData?.vehicleVerified === true ||
+    statusData?.vehicle_verified === true;
+  const isAtAirport = currentStage.key === 'at_airport';
+  const slotTimeRaw = getPickupTimeFromParams({ ...params, statusData, confirmation });
+  const slotTimeDisplay = formatPickupTime(slotTimeRaw);
   const barcodeData = pick(
     statusData?.barcodeData,
     statusData?.barcode_data,
@@ -277,7 +301,22 @@ const LiveTrackingScreen = ({ navigation, route }) => {
         const result = await apiService.getOTPStatus(bookingId);
         const next   = result.status || result.assignment || null;
         if (mounted && next) {
-          setStatusData(next);
+          setStatusData((prev) => ({
+            ...(prev || {}),
+            ...next,
+            pickupLocation:
+              next.pickupLocation ||
+              next.pickup_location ||
+              prev?.pickupLocation ||
+              confirmation.pickupLocation ||
+              confirmation.locationName,
+            destinationTerminal:
+              next.destinationTerminal ||
+              next.destination_terminal ||
+              prev?.destinationTerminal ||
+              confirmation.destinationTerminal,
+            slotTime: getPickupTimeFromParams({ ...params, statusData: next, confirmation }) || prev?.slotTime,
+          }));
           const lat =
             next.driverLat  != null ? Number(next.driverLat)  :
             next.driver_lat != null ? Number(next.driver_lat)  : null;
@@ -382,11 +421,10 @@ const LiveTrackingScreen = ({ navigation, route }) => {
     };
   }, [bookingId, startCountdown]);
 
-  // ── Boarding pass / airport handoff ───────────────────
+  // Persist trip + boarding pass only when driver marks airport
   useEffect(() => {
-    if ((!isBarcodeStage && !isAtAirport) || arrivedPing.current) return;
-    arrivedPing.current = true;
-    navigation.replace('Confirmation', {
+    if (!bookingId) return;
+    const tripParams = {
       ...params,
       bookingId,
       statusData,
@@ -398,13 +436,85 @@ const LiveTrackingScreen = ({ navigation, route }) => {
         locationName: pickupLocation,
         pickupLocation,
         destinationTerminal,
-        slotTime,
+        slotTime: slotTimeRaw,
         barcodeData,
         barcode_data: barcodeData,
-        qrCode: barcodeData || confirmation.qrCode,
+      },
+    };
+    savePassengerTrip({
+      bookingId,
+      params: tripParams,
+      status: statusData?.status,
+      vehicleId,
+      vehicleVerified: isVerifiedPassenger,
+      atAirport: isAtAirport,
+    });
+  }, [
+    barcodeData,
+    bookingId,
+    confirmation,
+    destinationTerminal,
+    isAtAirport,
+    isVerifiedPassenger,
+    params,
+    pickupLocation,
+    slotTimeRaw,
+    statusData,
+    vehicleId,
+  ]);
+
+  useEffect(() => {
+    if (!isAtAirport || arrivedPing.current) return;
+    arrivedPing.current = true;
+    navigation.replace('Confirmation', {
+      ...params,
+      bookingId,
+      isBoardingPass: true,
+      statusData,
+      confirmation: {
+        ...confirmation,
+        ...(statusData || {}),
+        vehicleId,
+        vehicleNumber: vehicleId,
+        locationName: pickupLocation,
+        pickupLocation,
+        destinationTerminal,
+        slotTime: slotTimeRaw,
+        barcodeData,
+        barcode_data: barcodeData,
+        qrCode: barcodeData,
+        reachedAirport: true,
       },
     });
-  }, [barcodeData, bookingId, confirmation, destinationTerminal, isAtAirport, isBarcodeStage, navigation, params, pickupLocation, slotTime, statusData, vehicleId]);
+  }, [
+    barcodeData,
+    bookingId,
+    confirmation,
+    destinationTerminal,
+    isAtAirport,
+    navigation,
+    params,
+    pickupLocation,
+    slotTimeRaw,
+    statusData,
+    vehicleId,
+  ]);
+
+  const qrPayload = () => {
+    if (!barcodeData) return bookingId || 'CITY-TERMINAL';
+    if (typeof barcodeData === 'string') {
+      try {
+        return JSON.stringify(JSON.parse(barcodeData));
+      } catch {
+        return barcodeData;
+      }
+    }
+    try {
+      return JSON.stringify(barcodeData);
+    } catch {
+      return bookingId || 'CITY-TERMINAL';
+    }
+  };
 
   // ── ETA display ───────────────────────────────────────
   // etaSeconds null = still loading initial stage
@@ -553,7 +663,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           <Text style={styles.detailLabel}>Destination</Text>
           <Text style={styles.detailValue}>{destinationTerminal}</Text>
           <Text style={styles.detailLabel}>Pickup Time</Text>
-          <Text style={styles.detailValue}>{slotTime || '--'}</Text>
+          <Text style={styles.detailValue}>{slotTimeDisplay}</Text>
         </View>
 
         {normalizeStatus(statusData?.status) === 'dispatched' && (
@@ -570,7 +680,16 @@ const LiveTrackingScreen = ({ navigation, route }) => {
           </View>
         ) : null}
 
-        {isAtPickup && (
+        {isVerifiedPassenger && barcodeData ? (
+          <View style={styles.qrCard}>
+            <Text style={styles.qrCardTitle}>Verified — Baggage QR</Text>
+            <Text style={styles.qrCardSub}>Same code as your confirmation boarding pass</Text>
+            <View style={styles.qrWrapper}>
+              <QRCode value={qrPayload()} size={180} backgroundColor="#FFFFFF" color="#0A0A0B" />
+            </View>
+            <Text style={styles.qrCaption}>SCAN AT AIRPORT COUNTER</Text>
+          </View>
+        ) : isAtPickup ? (
           <View style={styles.verificationContainer}>
             <Text style={styles.verificationLabel}>
               Driver reached you! Tell them your Vehicle ID (OTP) to unlock your barcode:
@@ -579,7 +698,7 @@ const LiveTrackingScreen = ({ navigation, route }) => {
               <Text style={styles.otpText}>{vehicleId}</Text>
             </View>
           </View>
-        )}
+        ) : null}
 
         {isAtAirport && (
           <View style={styles.airportBanner}>
@@ -747,6 +866,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   notifyBtnTxt: { color: COLORS.greenDark, fontWeight: '900' },
+  qrCard: {
+    marginTop: 18,
+    backgroundColor: '#101215',
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: COLORS.green,
+    alignItems: 'center',
+  },
+  qrCardTitle: { color: COLORS.green, fontWeight: '900', fontSize: 16 },
+  qrCardSub: { color: COLORS.muted, fontSize: 12, marginTop: 4, marginBottom: 14, textAlign: 'center' },
+  qrWrapper: {
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    borderRadius: 16,
+  },
+  qrCaption: {
+    marginTop: 12,
+    color: COLORS.green,
+    fontWeight: '900',
+    fontSize: 11,
+    letterSpacing: 1,
+  },
 });
 
 export default LiveTrackingScreen;

@@ -13,5 +13,6 @@ router.put('/driver-location', otpController.updateDriverLocation);
 router.put('/reached/:bookingId', otpController.reachedAirport);
 router.get('/status/:bookingId', otpController.getStatus);
 router.get('/pending/:vehicleId', otpController.listPendingBookings);
+router.get('/driver-tasks/:driverId', otpController.listDriverTasks);
 
 module.exports = router;

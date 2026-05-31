@@ -24,35 +24,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 
 import { useTranslation } from 'react-i18next';
+import { scanPassportFromImage } from '../services/passportOcr';
 import theme from '../theme';
 
 const { width } = Dimensions.get('window');
-
-const pickFirst = (...values) =>
-  values.find((value) => value !== undefined && value !== null && String(value).trim()) || '';
-
-const getBookingPassengerName = (bookingData = {}) =>
-  pickFirst(
-    bookingData.passengerName,
-    bookingData.passenger_name,
-    bookingData.verifiedName,
-    bookingData.verified_name,
-    bookingData.name,
-    'Demo Passenger'
-  );
-
-const createDummyPassportData = (bookingData = {}, bookingId = '') => ({
-  name: getBookingPassengerName(bookingData),
-  passportNumber: pickFirst(
-    bookingData.passportNumber,
-    bookingData.passport_number,
-    `DUMMY${String(bookingId || '000000').slice(-6)}`
-  ),
-  dateOfBirth: pickFirst(bookingData.dateOfBirth, bookingData.date_of_birth, '1995-01-01'),
-  nationality: pickFirst(bookingData.nationality, 'Demo Nationality'),
-  confidence: 0.99,
-  mode: 'dummy',
-});
 
 const PassportScanScreen = ({ navigation, route }) => {
   const { t, i18n } = useTranslation();
@@ -148,34 +123,26 @@ const PassportScanScreen = ({ navigation, route }) => {
     setIsScanning(true);
 
     try {
-      // ── API CALL ──────────────────────────────────────────
-      // Backend se response aata hai:
-      // { success: true, data: { name, passportNumber, dateOfBirth, ... } }
-      const dummyPassportData = createDummyPassportData(bookingData, bookingId);
+      const passportData = await scanPassportFromImage({
+        imageBase64: capturedImage.base64,
+        bookingId,
+      });
 
-      // ── BUG FIX 1: response.data pass karo, response nahi ─
-      // Pehle: passportData: result  ← WRONG (pura response object)
-      // Ab:    passportData: response.data ← CORRECT (sirf extracted data)
-      // Real OCR is preserved in apiService.verifyPassportReal for future use.
-
-      // ── BUG FIX 2: Navigate karne se pehle state reset karo
-      // Warna jab back aao toh loop shuru hoga
       setScanStep('guide');
       setCapturedImage(null);
 
-      // ── NEXT SCREEN PE JAAO ───────────────────────────────
       navigation.navigate('Verification', {
-        bookingData: bookingData,
-        bookingId: bookingId,
-        airline: airline,
-        passportData: dummyPassportData,
+        bookingData,
+        bookingId,
+        airline,
+        passportData,
         passportImage: capturedImage.uri,
       });
-
     } catch (err) {
-      // ── ERROR HANDLING ────────────────────────────────────
       console.error('Passport scan error:', err.message);
-      const message = err.message || 'Passport details were not found clearly. Please upload a clearer photo.';
+      const message =
+        err.message ||
+        'Passport details were not found clearly. Please upload a clearer photo with MRZ lines visible.';
       setScanError(message);
 
       Alert.alert(
@@ -244,7 +211,7 @@ const PassportScanScreen = ({ navigation, route }) => {
             <ActivityIndicator size="large" color={theme.colors.careemGreen} />
             <Text style={styles.processingTitle}>{t('verification.passportInfo')}</Text>
             <Text style={styles.processingSubtitle}>
-              {t('verification.subtitle')}
+              Reading passport with OCR (name, number, DOB, nationality)…
             </Text>
           </View>
         </View>

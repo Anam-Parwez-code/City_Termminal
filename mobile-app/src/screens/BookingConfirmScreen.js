@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
+import { savePassengerTrip } from '../services/passengerTripStorage';
+import { formatPickupTime, getPickupTimeFromParams } from '../utils/slotTime';
 
 const COLORS = {
   bg: '#0A0A0B',
@@ -25,13 +27,6 @@ const COLORS = {
 
 const pick = (...values) =>
   values.find((value) => value != null && String(value).trim() !== '' && String(value).trim() !== '--');
-
-const formatTime = (value) => {
-  if (!value) return '--';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-};
 
 const pickupNameFrom = (value) => {
   if (!value) return null;
@@ -95,9 +90,11 @@ const BookingConfirmScreen = ({ navigation, route }) => {
     try {
       const pName = pick(pickupNameFrom(params.pickupLocation), params.pickupLocationName, params.slotDetails?.locationName) || '--';
       const term = pick(params.destinationTerminal, params.confirmation?.destinationTerminal, params.bookingData?.terminal) || '--';
-      const sTime = pick(params.slotDetails?.slotTime, params.confirmation?.slotTime, params.selectedTimeSlot);
+      const sTime = getPickupTimeFromParams(params) || pick(params.selectedTimeSlot);
 
-      setPickupLoc(pName); setDestTerminal(term); setPickupTime(sTime);
+      setPickupLoc(pName);
+      setDestTerminal(term);
+      setPickupTime(sTime);
 
       let otpRes = null;
       try {
@@ -154,10 +151,13 @@ const BookingConfirmScreen = ({ navigation, route }) => {
   };
 
   // --- FUNCTONS KO RETURN KE UPAR RAKHO ---
-  const goToTracking = () => {
-    navigation.navigate('LiveTracking', {
+  const goToTracking = async () => {
+    const tripParams = {
       ...params,
       bookingId,
+      pickupLocationName: pickupLoc,
+      destinationTerminal: destTerminal,
+      pickupTimeIso: pickupTime,
       confirmation: {
         ...params.confirmation,
         vehicleId,
@@ -170,7 +170,15 @@ const BookingConfirmScreen = ({ navigation, route }) => {
         destinationTerminal: destTerminal,
         slotTime: pickupTime,
       },
+    };
+    await savePassengerTrip({
+      bookingId,
+      params: tripParams,
+      phase: 'tracking',
+      status,
+      vehicleId,
     });
+    navigation.navigate('LiveTracking', tripParams);
   };
 
   const goToProfile = () => {
@@ -251,7 +259,7 @@ const BookingConfirmScreen = ({ navigation, route }) => {
         />
         <DetailRow
           label="Pickup Time"
-          value={formatTime(pickupTime)}
+          value={formatPickupTime(pickupTime)}
           loading={loading}
         />
         <DetailRow
