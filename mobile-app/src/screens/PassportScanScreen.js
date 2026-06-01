@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import * as ImagePicker from 'expo-image-picker';
 
 import { useTranslation } from 'react-i18next';
 import { scanPassportFromImage } from '../services/passportOcr';
@@ -65,40 +65,47 @@ const PassportScanScreen = ({ navigation, route }) => {
     }
   };
 
-  // ─── GALLERY SE PHOTO LO ─────────────────────────────────
-  const handlePickImage = async (type) => {
+  // ─── GALLERY SE PHOTO LO (expo-image-picker — works on Expo Go / real phone) ───
+  const handlePickFromGallery = async () => {
     setScanError('');
-    const options = {
-      mediaType: 'photo',
-      includeBase64: true,
-      quality: 0.7,
-    };
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          t('passportScan.galleryPermissionTitle'),
+          t('passportScan.galleryPermissionMessage'),
+        );
+        return;
+      }
 
-    const result = type === 'camera'
-      ? await launchCamera(options)
-      : await launchImageLibrary(options);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.85,
+        base64: true,
+      });
 
-    // ── BUG FIX: result check karo properly ───────────────
-    // Agar user cancel kare toh result.assets undefined hoga
-    if (!result || result.didCancel || !result.assets || result.assets.length === 0) {
-      return; // Kuch nahi karo — loop nahi hoga
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!asset.base64) {
+        setScanError(t('passportScan.noBase64'));
+        Alert.alert(t('common.error'), t('passportScan.noBase64'));
+        return;
+      }
+
+      setCapturedImage({
+        uri: asset.uri,
+        base64: asset.base64,
+      });
+      setScanStep('captured');
+    } catch (err) {
+      console.warn('Gallery pick failed:', err?.message);
+      setScanError(t('passportScan.galleryFailed'));
+      Alert.alert(t('common.error'), t('passportScan.galleryFailed'));
     }
-
-    const asset = result.assets[0];
-
-    // Base64 available hai?
-    if (!asset.base64) {
-      setScanError('Could not read this image. Please choose another passport photo.');
-      Alert.alert(t('common.error'), t('slotBooking.tryLater'));
-      return;
-    }
-
-    setCapturedImage({
-      uri: asset.uri,
-      base64: asset.base64,
-    });
-
-    setScanStep('captured'); // Captured step pe jaao
   };
 
   // ─── RETAKE ──────────────────────────────────────────────
@@ -140,24 +147,26 @@ const PassportScanScreen = ({ navigation, route }) => {
       });
     } catch (err) {
       console.error('Passport scan error:', err.message);
+
+      if (err.partialData && (err.partialData.passportNumber || err.partialData.name)) {
+        setScanStep('guide');
+        setCapturedImage(null);
+        navigation.navigate('Verification', {
+          bookingData,
+          bookingId,
+          airline,
+          passportData: { ...err.partialData, needsReview: true },
+          passportImage: capturedImage.uri,
+        });
+        return;
+      }
+
       const message =
         err.message ||
         'Passport details were not found clearly. Please upload a clearer photo with MRZ lines visible.';
       setScanError(message);
-
-      Alert.alert(
-        'Passport not verified',
-        message,
-        [
-          {
-            text: 'Try again',
-          },
-        ]
-      );
-
-      // Error pe preview par rakho, taaki user reason dekh kar retake/upload kar sake.
+      Alert.alert('Passport not verified', message, [{ text: 'Try again' }]);
       setScanStep('captured');
-
     } finally {
       setIsScanning(false);
     }
@@ -186,9 +195,10 @@ const PassportScanScreen = ({ navigation, route }) => {
 
         <TouchableOpacity
           style={styles.gallerySecondaryButton}
-          onPress={() => handlePickImage('gallery')}
+          onPress={handlePickFromGallery}
+          activeOpacity={0.85}
         >
-          <Text style={styles.gallerySecondaryText}>📁 {t('bookingEntry.demoButton')}</Text>
+          <Text style={styles.gallerySecondaryText}>📁 {t('passportScan.chooseGallery')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.skipButton} onPress={() => navigation.goBack()}>
@@ -309,10 +319,11 @@ const PassportScanScreen = ({ navigation, route }) => {
 
               {/* Gallery Button */}
               <TouchableOpacity
-                style={styles.gallerySecondaryButton}
-                onPress={() => handlePickImage('gallery')}
+                style={styles.galleryOnCameraButton}
+                onPress={handlePickFromGallery}
+                activeOpacity={0.85}
               >
-                <Text style={styles.gallerySecondaryText}>📁 {t('bookingEntry.demoButton')}</Text>
+                <Text style={styles.galleryOnCameraText}>📁 {t('passportScan.chooseGallery')}</Text>
               </TouchableOpacity>
 
               {scanError ? (
@@ -408,11 +419,25 @@ const styles = StyleSheet.create({
   instructionItem: { fontSize: 13, color: 'rgba(255,255,255,0.8)', lineHeight: 18 },
 
   gallerySecondaryButton: {
-    backgroundColor: theme.colors.cardMuted, paddingVertical: 12,
-    paddingHorizontal: 20, borderRadius: 10,
-    marginBottom: 20, alignItems: 'center',
+    backgroundColor: theme.colors.cardMuted,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginBottom: 20,
+    alignItems: 'center',
+    width: '100%',
   },
   gallerySecondaryText: { color: theme.colors.black, fontWeight: '800', fontSize: 14 },
+  galleryOnCameraButton: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    paddingVertical: 14,
+    paddingHorizontal: 22,
+    borderRadius: 12,
+    marginBottom: 16,
+    alignItems: 'center',
+    width: '100%',
+  },
+  galleryOnCameraText: { color: theme.colors.black, fontWeight: '800', fontSize: 15 },
 
   captureButton: { marginBottom: 12 },
   captureOuter: {

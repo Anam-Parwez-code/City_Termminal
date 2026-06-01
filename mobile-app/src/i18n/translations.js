@@ -52,6 +52,13 @@ const translations = {
         restartTitle: "Restart Required",
         restartMessage: "Please restart the app once to apply the language direction change.",
       },
+      passportScan: {
+        chooseGallery: "Choose from Gallery",
+        galleryPermissionTitle: "Photo access needed",
+        galleryPermissionMessage: "Allow access to your photos to upload a passport image.",
+        galleryFailed: "Could not open gallery. Please try again.",
+        noBase64: "Could not read this image. Try another photo.",
+      },
       verification: {
         step: "Step 3 of 5",
         title: "Verify Your Details",
@@ -204,6 +211,13 @@ const translations = {
         skip: "تخطي",
         restartTitle: "إعادة تشغيل مطلوبة",
         restartMessage: "يرجى إعادة تشغيل التطبيق مرة واحدة لتطبيق تغيير اتجاه اللغة.",
+      },
+      passportScan: {
+        chooseGallery: "اختر من المعرض",
+        galleryPermissionTitle: "مطلوب الوصول للصور",
+        galleryPermissionMessage: "اسمح بالوصول إلى الصور لرفع صورة جواز السفر.",
+        galleryFailed: "تعذر فتح المعرض. حاول مرة أخرى.",
+        noBase64: "تعذر قراءة الصورة. جرّب صورة أخرى.",
       },
       verification: {
         step: "الخطوة 3 من 5",

@@ -28,18 +28,19 @@ import apiService from '../services/apiService';
 import adminService from '../services/adminService';
 import PassportScan from './PassportScanScreen'; // Hamara API helper
 import BrandMark from '../components/BrandMark';
+import FlagImage from '../components/FlagImage';
 import theme from '../theme';
 
 // ============================================================
 // AIRLINES DATA — Dropdown mein dikhenge
 // ============================================================
 const AIRLINES = [
-  { code: 'EK', name: 'Emirates', flag: '🇦🇪' },
-  { code: 'FZ', name: 'flydubai', flag: '🇦🇪' },
-  { code: 'QR', name: 'Qatar Airways', flag: '🇶🇦' },
-  { code: 'EY', name: 'Etihad Airways', flag: '🇦🇪' },
-  { code: 'SV', name: 'Saudi Arabian Airlines', flag: '🇸🇦' },
-  { code: 'AI', name: 'Air India', flag: '🇮🇳' },
+  { code: 'EK', name: 'Emirates', countryCode: 'ae' },
+  { code: 'FZ', name: 'flydubai', countryCode: 'ae' },
+  { code: 'QR', name: 'Qatar Airways', countryCode: 'qa' },
+  { code: 'EY', name: 'Etihad Airways', countryCode: 'ae' },
+  { code: 'SV', name: 'Saudi Arabian Airlines', countryCode: 'sa' },
+  { code: 'AI', name: 'Air India', countryCode: 'in' },
 ];
 
 // ============================================================
@@ -273,10 +274,12 @@ const BookingEntryScreen = ({ navigation }) => {
               onPress={() => setShowAirlineList(!showAirlineList)} // Toggle
             >
               {selectedAirline ? (
-                // Airline selected hai → naam dikhaoo
-                <Text style={[styles.dropdownSelected, isRTL && styles.textRight]}>
-                  {selectedAirline.flag} {selectedAirline.name}
-                </Text>
+                <View style={[styles.dropdownSelectedRow, isRTL && styles.rowReverse]}>
+                  <FlagImage countryCode={selectedAirline.countryCode} size={28} />
+                  <Text style={[styles.dropdownSelected, isRTL && styles.textRight]}>
+                    {selectedAirline.name}
+                  </Text>
+                </View>
               ) : (
                 // Kuch select nahi → placeholder
                 <Text style={[styles.dropdownPlaceholder, isRTL && styles.textRight]}>
@@ -306,8 +309,9 @@ const BookingEntryScreen = ({ navigation }) => {
                     ]}
                     onPress={() => handleAirlineSelect(airline)}
                   >
-                    <Text style={styles.airlineFlag}>{airline.flag}</Text>
+                    <FlagImage countryCode={airline.countryCode} size={30} />
                     <Text style={[styles.airlineName, isRTL && styles.textRight]}>{airline.name}</Text>
+                    <Text style={styles.airlineCode}>{airline.code}</Text>
                     {/* Selected tick */}
                     {selectedAirline?.code === airline.code && (
                       <Text style={styles.airlineTick}>✓</Text>
@@ -574,7 +578,14 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 0,
   },
 
+  dropdownSelectedRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   dropdownSelected: {
+    flex: 1,
     fontSize: 15,
     color: theme.colors.black,
     fontWeight: '500',
@@ -615,15 +626,18 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.cardMuted,
   },
 
-  airlineFlag: {
-    fontSize: 22,
-  },
-
   airlineName: {
     flex: 1,
     fontSize: 15,
     color: theme.colors.black,
     fontWeight: '500',
+  },
+
+  airlineCode: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.colors.muted,
+    letterSpacing: 0.5,
   },
 
   airlineTick: {

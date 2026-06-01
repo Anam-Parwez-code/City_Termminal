@@ -53,45 +53,44 @@ const scanPassport = async (req, res) => {
 
     const normalized = normalizePassportPayload(extractedData);
 
-    if (!hasRequiredPassportData(normalized)) {
+    if (!hasMinimumPassportData(normalized)) {
       return res.status(422).json({
         success: false,
-        message: 'Passport details not found clearly. Please retake the photo with name, passport number and DOB visible.',
+        message: 'Could not read passport number clearly. Retake with MRZ lines at the bottom visible.',
         data: normalized,
       });
     }
 
-    if (bookingId) {
-      const booking = await pool.query(
-        `SELECT passenger_name, passport_number, date_of_birth
-         FROM bookings
-         WHERE UPPER(booking_id) = UPPER($1)
-         LIMIT 1`,
-        [bookingId]
-      );
+    normalized.needsReview = !hasRequiredPassportData(normalized);
+    let nameMismatch = false;
 
-      if (booking.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Booking not found for passport verification.',
-        });
-      }
+    if (bookingId && pool.isDbReachable && pool.isDbReachable()) {
+      try {
+        const booking = await pool.query(
+          `SELECT passenger_name, passport_number, date_of_birth
+           FROM bookings
+           WHERE UPPER(booking_id) = UPPER($1)
+           LIMIT 1`,
+          [bookingId]
+        );
 
-      const row = booking.rows[0];
-      if (!namesMatch(normalized.name, row.passenger_name)) {
-        return res.status(401).json({
-          success: false,
-          message: 'Passport name does not match this booking. Please upload the passenger passport.',
-          data: normalized,
-        });
-      }
-
-      if (row.passport_number && normalized.passportNumber && normalizeToken(row.passport_number) !== normalizeToken(normalized.passportNumber)) {
-        return res.status(401).json({
-          success: false,
-          message: 'Passport number does not match this booking.',
-          data: normalized,
-        });
+        if (booking.rows.length > 0) {
+          const row = booking.rows[0];
+          if (row.passenger_name && normalized.name && !namesMatch(normalized.name, row.passenger_name)) {
+            nameMismatch = true;
+            normalized.needsReview = true;
+          }
+          if (
+            row.passport_number &&
+            normalized.passportNumber &&
+            normalizeToken(row.passport_number) !== normalizeToken(normalized.passportNumber)
+          ) {
+            nameMismatch = true;
+            normalized.needsReview = true;
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Booking lookup skipped for passport scan:', dbErr.message);
       }
     }
 
@@ -99,6 +98,7 @@ const scanPassport = async (req, res) => {
       success: true,
       data: normalized,
       method,
+      nameMismatch,
     });
   } catch (error) {
     console.error('Passport scan error:', error.message);
@@ -134,24 +134,36 @@ const namesMatch = (passportName, bookingName) => {
 
 const scanWithTesseract = async (imageBase64) => {
   const imageBuffer = Buffer.from(normalizeBase64(imageBase64), 'base64');
-  const { data } = await Tesseract.recognize(imageBuffer, 'eng', {
-    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789< -/.,',
-    preserve_interword_spaces: '1',
-  });
+  const texts = [];
 
-  const rawText = data?.text || '';
-  console.log('Raw OCR text:', rawText);
+  for (const psm of ['6', '11', '3']) {
+    try {
+      const { data } = await Tesseract.recognize(imageBuffer, 'eng', {
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789< -/.,',
+        preserve_interword_spaces: '1',
+        tessedit_pageseg_mode: psm,
+      });
+      if (data?.text) texts.push(data.text);
+    } catch (ocrErr) {
+      console.warn(`Tesseract PSM ${psm} failed:`, ocrErr.message);
+    }
+  }
+
+  const rawText = texts.join('\n');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Raw OCR text (first 400 chars):', rawText.slice(0, 400));
+  }
 
   const mrz = parseMRZ(rawText);
   const visual = parseVisualText(rawText);
-
-  return {
+  const merged = {
     ...visual,
     ...Object.fromEntries(
       Object.entries(mrz).filter(([, value]) => value !== null && value !== undefined && value !== '')
     ),
-    confidence: hasRequiredPassportData(mrz) ? 0.9 : 0.55,
+    confidence: hasRequiredPassportData(mrz) ? 0.9 : hasMinimumPassportData(mrz) ? 0.75 : 0.55,
   };
+  return merged;
 };
 
 const scanWithOpenAI = async (imageBase64) => {
@@ -219,7 +231,7 @@ const parseMRZ = (rawText) => {
   const lines = String(rawText || '')
     .split(/\r?\n/)
     .map(repairMrzLine)
-    .filter((line) => line.length >= 28 && line.includes('<'));
+    .filter((line) => line.length >= 20 && line.includes('<'));
 
   const candidates = [];
   for (let i = 0; i < lines.length - 1; i += 1) {
@@ -292,7 +304,10 @@ const parseVisualText = (rawText) => {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
   const dateMatches = [...upper.matchAll(/\b(?:\d{1,2}\s*(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*[\s/-]*\d{2,4}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b/g)];
   const dates = dateMatches.map((match) => parseDateToken(match[0])).filter(Boolean);
-  const passportMatch = upper.match(/\b[A-Z]{1,2}[0-9]{6,8}\b/) || upper.match(/\b[0-9]{8,9}\b/);
+  const passportMatch =
+    upper.match(/\b[A-Z][0-9]{7,8}\b/) ||
+    upper.match(/\b[A-Z]{2}[0-9]{6,7}\b/) ||
+    upper.match(/\b[0-9]{8,9}\b/);
   const nationalityMatch = upper.match(/\b(INDIAN|INDIA|BRITISH|UNITED KINGDOM|AMERICAN|USA|PAKISTANI|PAKISTAN|PHILIPPINES|FILIPINO|EMIRATI|UAE|NEPALI|BANGLADESHI|SRI LANKAN|EGYPTIAN|JORDANIAN|SAUDI)\b/);
 
   let guessedName = null;
@@ -321,6 +336,15 @@ const parseVisualText = (rawText) => {
 const hasRequiredPassportData = (data) => {
   if (!data) return false;
   return Boolean(data.name && data.passportNumber && data.dateOfBirth && data.nationality);
+};
+
+const hasMinimumPassportData = (data) => {
+  if (!data) return false;
+  const passNo = String(data.passportNumber || '').replace(/\s/g, '');
+  return (
+    passNo.length >= 6 &&
+    Boolean(String(data.name || '').trim() || String(data.dateOfBirth || '').trim())
+  );
 };
 
 const normalizePassportPayload = (data) => {

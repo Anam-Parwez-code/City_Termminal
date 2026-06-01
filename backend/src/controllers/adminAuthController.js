@@ -8,7 +8,7 @@
 // ============================================================
 
 const jwt = require('jsonwebtoken');
-const pool = require('../config/db'); // ← config/db nahi, config/database
+const pool = require('../config/db');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'city-terminal-secret-2026';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
@@ -47,30 +47,29 @@ const loginAdmin = async (req, res) => {
 
     let user = null;
 
-    // DB se try karo
-    try {
-      await ensureAdminUsersTable();
-      const result = await pool.query(
-        'SELECT email, password, role, name FROM admin_users WHERE LOWER(email) = LOWER($1) LIMIT 1',
-        [email.trim()]
-      );
+    if (pool.isDbReachable && pool.isDbReachable()) {
+      try {
+        await ensureAdminUsersTable();
+        const result = await pool.query(
+          'SELECT email, password, role, name FROM admin_users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+          [email.trim()]
+        );
 
-      if (result.rows.length > 0) {
-        const dbUser = result.rows[0];
-        // Plain text comparison (production mein bcrypt use karo)
-        if (dbUser.password === password.trim()) {
-          user = dbUser;
-          console.log('✅ Login via DB:', user.email);
-        } else {
-          console.log('❌ Wrong password for:', email);
-          return res.status(401).json({
-            success: false,
-            message: 'Invalid credentials',
-          });
+        if (result.rows.length > 0) {
+          const dbUser = result.rows[0];
+          if (dbUser.password === password.trim()) {
+            user = dbUser;
+            console.log('✅ Login via DB:', user.email);
+          } else {
+            return res.status(401).json({
+              success: false,
+              message: 'Invalid credentials',
+            });
+          }
         }
+      } catch (dbErr) {
+        console.warn('DB login skipped:', dbErr.message);
       }
-    } catch (dbErr) {
-      console.error('DB error in login — using fallback:', dbErr.message);
     }
 
     // DB mein nahi mila — fallback check karo

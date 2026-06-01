@@ -18,6 +18,7 @@ import {
 import * as Updates from 'expo-updates';
 
 import { useTranslation } from 'react-i18next'; // Translation hook
+import FlagImage from '../components/FlagImage';
 import theme from '../theme';
 
 // =============================================
@@ -26,19 +27,19 @@ import theme from '../theme';
 // Yahan languages define karo — easily add/remove kar sakte ho
 const LANGUAGES = [
   {
-    code: 'en',         // i18n language code
+    code: 'en',
     name: 'English',
-    nativeName: 'English',  // Apni language mein naam
-    flag: '🇺🇸',            // Flag emoji
-    isRTL: false,           // Left-to-right
+    nativeName: 'English',
+    countryCode: 'us',
+    isRTL: false,
     direction: 'LTR',
   },
   {
     code: 'ar',
     name: 'Arabic',
-    nativeName: 'عربي',     // Arabic mein "Arabic"
-    flag: '🇦🇪',            // UAE flag
-    isRTL: true,            // Right-to-left
+    nativeName: 'عربي',
+    countryCode: 'ae',
+    isRTL: true,
     direction: 'RTL',
   },
 ];
@@ -153,8 +154,11 @@ const LanguageSelectScreen = ({ navigation }) => {
               activeOpacity={0.8}  // Press pe thoda transparent ho
             >
 
-              {/* FLAG */}
-              <Text style={styles.flag}>{language.flag}</Text>
+              <FlagImage
+                countryCode={language.countryCode}
+                size={48}
+                style={[styles.flagImage, isRTL && styles.flagImageRtl]}
+              />
 
               {/* LANGUAGE INFO */}
               <View style={styles.langInfo}>
@@ -293,9 +297,12 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.careemGreen,
     backgroundColor: theme.colors.white,
   },
-  flag: {
-    fontSize: 40,
+  flagImage: {
     marginRight: 18,
+  },
+  flagImageRtl: {
+    marginRight: 0,
+    marginLeft: 18,
   },
   langInfo: {
     flex: 1,

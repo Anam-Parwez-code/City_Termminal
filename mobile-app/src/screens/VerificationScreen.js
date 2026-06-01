@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import apiService from '../services/apiService';
-import { formatNationality } from '../services/passportOcr';
+import { formatNationality, hasMinimumPassportData } from '../services/passportOcr';
 import theme from '../theme';
 
 const COLORS = {
@@ -118,16 +118,26 @@ const VerificationScreen = ({ navigation, route }) => {
     mergedBookingData?.passenger_name ||
     mergedBookingData?.name ||
     '';
-  const hasVisibleRequiredData = Boolean(name?.trim() && passportNo?.trim() && dob?.trim() && nationality?.trim());
+  const hasFullData = Boolean(name?.trim() && passportNo?.trim() && dob?.trim() && nationality?.trim());
+  const hasMinimumData = hasMinimumPassportData({
+    name,
+    passportNumber: passportNo,
+    dateOfBirth: dob,
+    nationality,
+  });
   const nameMatchesBooking = bookingPassengerName ? namesMatch(name, bookingPassengerName) : true;
-  const canVerifyPassport = hasVisibleRequiredData && nameMatchesBooking;
+  const canVerifyPassport = hasMinimumData && nameMatchesBooking;
+  const showReviewHint = passportData?.needsReview || !hasFullData;
 
   // ── CONFIRM — SEEDHA SLOT BOOKING PE JAO ─────────────────
   // Passport update backend call NAHI karein
   // Sirf data carry karein aur aage jaao
   const handleConfirm = async () => {
-    if (!hasVisibleRequiredData) {
-      Alert.alert('Passport not found', 'Name, passport number, date of birth and nationality must be visible before verification.');
+    if (!hasMinimumData) {
+      Alert.alert(
+        'Passport not found',
+        'Enter at least passport number and name (or date of birth) from your passport photo.',
+      );
       return;
     }
     if (!nameMatchesBooking) {
@@ -228,9 +238,15 @@ const VerificationScreen = ({ navigation, route }) => {
       {!canVerifyPassport ? (
         <View style={styles.warningBox}>
           <Text style={[styles.warningText, isRTL && styles.textRight]}>
-            {!hasVisibleRequiredData
-              ? 'Passport details not found clearly. Please retake or edit only after checking the document.'
+            {!hasMinimumData
+              ? 'Tap ✎ to enter passport number and name from your photo, then continue.'
               : 'Passport name does not match the booking passenger name.'}
+          </Text>
+        </View>
+      ) : showReviewHint ? (
+        <View style={[styles.warningBox, styles.infoBox]}>
+          <Text style={[styles.warningText, isRTL && styles.textRight]}>
+            Some fields were auto-filled — please review and edit using ✎ before continuing.
           </Text>
         </View>
       ) : null}
@@ -338,6 +354,7 @@ const styles = StyleSheet.create({
   confidenceTrack: { height: 8, borderRadius: 999, backgroundColor: '#2E3138', overflow: 'hidden' },
   confidenceFill: { height: '100%', borderRadius: 999 },
   warningBox: { backgroundColor: 'rgba(239,51,64,0.12)', borderWidth: 1, borderColor: 'rgba(239,51,64,0.35)', borderRadius: 14, padding: 14, marginBottom: 18 },
+  infoBox: { backgroundColor: 'rgba(71,211,97,0.12)', borderColor: 'rgba(71,211,97,0.4)' },
   warningText: { color: '#FFD0D4', fontSize: 13, fontWeight: '700', lineHeight: 19 },
   passportImageContainer: { marginBottom: 24, borderRadius: 16, overflow: 'hidden', position: 'relative' },
   passportThumbnail: { width: '100%', height: 160, borderRadius: 16 },

@@ -1,5 +1,21 @@
 {
-  "plugins": [
-    "expo-secure-store"
-  ]
+  "expo": {
+    "name": "City Terminal",
+    "slug": "city-terminal",
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow City Terminal to scan your passport with the camera."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow City Terminal to choose a passport photo from your gallery."
+        }
+      ]
+    ]
+  }
 }

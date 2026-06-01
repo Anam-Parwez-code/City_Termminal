@@ -10,26 +10,21 @@
 // ============================================================
 
 import axios from 'axios';
+import {
+  API_BASE_URL,
+  AI_BASE_URL,
+  getSocketBaseUrl,
+  getApiConnectionHint,
+} from '../config/apiConfig';
 
-// ── BASE URL ──────────────────────────────────────────────
-// IMPORTANT: Apna computer ka IP daalo yahan!
-// Windows: CMD → ipconfig → IPv4 Address
-// Mac/Linux: terminal → ifconfig
-// Mobile aur laptop EK HI WiFi pe hone chahiye!
-const BASE_URL = 'http://192.168.81.224:5000/api';
-//                    ^^^^^^^^^^^ Yahan apna IP daalo
-const AI_BASE_URL = 'http://192.168.36.224:8000';
+export { API_BASE_URL, getSocketBaseUrl };
 
-export const getSocketBaseUrl = () => {
-  const trimmed = BASE_URL.replace(/\/api\/?$/i, '').trim();
-  if (trimmed) return trimmed;
-  try {
-    const u = new URL(BASE_URL);
-    return `${u.origin}`;
-  } catch {
-    return 'http://localhost:5000';
-  }
-};
+const BASE_URL = API_BASE_URL;
+
+if (__DEV__) {
+  console.log('[City Terminal] API →', BASE_URL);
+  console.log('[City Terminal]', getApiConnectionHint());
+}
 
 // ── AXIOS INSTANCE ────────────────────────────────────────
 const api = axios.create({
@@ -55,7 +50,11 @@ api.interceptors.response.use(
   (response) => response.data, // { success, data, ... }
   (error) => {
     if (!error.response) {
-      throw new Error('Network error. Check your WiFi connection.');
+      throw new Error(
+        `Cannot reach server at ${BASE_URL}. ` +
+          'On a real phone: same WiFi as PC, run "node server.js" in backend, then set mobile-app/.env → ' +
+          'EXPO_PUBLIC_API_URL=http://YOUR_PC_IP:5000 (Windows: ipconfig → IPv4). Restart: npx expo start -c',
+      );
     }
     const message = error.response?.data?.message || 'Something went wrong';
     const err = new Error(message);

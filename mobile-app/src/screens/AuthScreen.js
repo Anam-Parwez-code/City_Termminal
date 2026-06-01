@@ -11,7 +11,6 @@
 
 import React, { useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -25,6 +24,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 import { saveDriverSession } from '../services/driverSession';
+import { isNetworkError, showMessage } from '../utils/showMessage';
 import BrandMark from '../components/BrandMark';
 import theme from '../theme';
 
@@ -40,6 +40,8 @@ const AuthScreen = ({ navigation }) => {
   const [isAvailable, setIsAvailable] = useState(true);
   const [loading,     setLoading]     = useState(false);
   const [emailError,  setEmailError]  = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const [submitInfo,  setSubmitInfo]  = useState('');
 
   const T = (en, ar) => isRTL ? ar : en;
 
@@ -68,12 +70,14 @@ const AuthScreen = ({ navigation }) => {
 
   // ── SUBMIT ────────────────────────────────────────────────
   const handleSubmit = async () => {
+    setSubmitError('');
+    setSubmitInfo('');
+
     if (mode === 'driver') {
       if (!driverId.trim()) {
-        Alert.alert(
-          T('Required', 'مطلوب'),
-          T('Please enter your Driver / Vehicle ID.', 'يرجى إدخال رقم السائق / المركبة.')
-        );
+        const msg = T('Please enter your Driver / Vehicle ID.', 'يرجى إدخال رقم السائق / المركبة.');
+        setSubmitError(msg);
+        showMessage(T('Required', 'مطلوب'), msg);
         return;
       }
       setLoading(true);
@@ -81,10 +85,9 @@ const AuthScreen = ({ navigation }) => {
         await saveDriverSession('', driverId.trim().toUpperCase());
         navigation.replace('DriverTrip');
       } catch {
-        Alert.alert(
-          T('Login failed', 'فشل تسجيل الدخول'),
-          T('Could not authenticate driver.', 'تعذر التحقق من هوية السائق.')
-        );
+        const msg = T('Could not authenticate driver.', 'تعذر التحقق من هوية السائق.');
+        setSubmitError(msg);
+        showMessage(T('Login failed', 'فشل تسجيل الدخول'), msg);
       } finally {
         setLoading(false);
       }
@@ -92,10 +95,9 @@ const AuthScreen = ({ navigation }) => {
     }
 
     if (!password.trim()) {
-      Alert.alert(
-        T('Required', 'مطلوب'),
-        T('Please enter your password.', 'يرجى إدخال كلمة المرور.')
-      );
+      const msg = T('Please enter your password.', 'يرجى إدخال كلمة المرور.');
+      setSubmitError(msg);
+      showMessage(T('Required', 'مطلوب'), msg);
       return;
     }
     if (!validateEmail(email)) {
@@ -103,34 +105,60 @@ const AuthScreen = ({ navigation }) => {
     }
 
     setLoading(true);
+    const trimmedEmail = email.trim();
+    const trimmedName = name.trim() || trimmedEmail;
+
+    await adminService.savePassengerSession({
+      email: trimmedEmail,
+      name: trimmedName,
+    });
+
+    const authCall =
+      mode === 'signup'
+        ? adminService.signup({
+            email: trimmedEmail,
+            password: password.trim(),
+            name: trimmedName,
+          })
+        : adminService.login({
+            email: trimmedEmail,
+            password: password.trim(),
+          });
+
     try {
-      if (mode === 'signup') {
-        await adminService.signup({
-          email:    email.trim(),
-          password: password.trim(),
-          name:     name.trim(),
-        });
-      } else {
-        await adminService.login({
-          email:    email.trim(),
-          password: password.trim(),
-        });
-      }
-
-      await routeAfterAuth();
-
+      await Promise.race([
+        authCall,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('timeout')), 6000);
+        }),
+      ]);
     } catch (err) {
-      const message = err?.response?.data?.message || err.message
-        || T('Please try again', 'يرجى المحاولة مرة أخرى');
-      Alert.alert(
-        mode === 'signup'
-          ? T('Create account failed', 'فشل إنشاء الحساب')
-          : T('Login failed', 'فشل تسجيل الدخول'),
-        message
-      );
-    } finally {
-      setLoading(false);
+      if (isNetworkError(err) || String(err?.message || '').includes('timeout')) {
+        setSubmitInfo(
+          T(
+            'Opened offline — booking demo ID: EK123456 (Emirates). Fix API in .env if needed.',
+            'تم الفتح دون اتصال — رقم تجريبي: EK123456 (طيران الإمارات).'
+          ),
+        );
+      } else {
+        const message =
+          err?.response?.data?.message ||
+          err?.message ||
+          T('Please try again', 'يرجى المحاولة مرة أخرى');
+        setSubmitError(message);
+        setLoading(false);
+        showMessage(
+          mode === 'signup'
+            ? T('Create account failed', 'فشل إنشاء الحساب')
+            : T('Login failed', 'فشل تسجيل الدخول'),
+          message,
+        );
+        return;
+      }
     }
+
+    setLoading(false);
+    await routeAfterAuth();
   };
 
   return (
@@ -160,7 +188,7 @@ const AuthScreen = ({ navigation }) => {
           <View style={[styles.switchRow, isRTL && styles.rtlRow]}>
             <TouchableOpacity
               style={[styles.switchBtn, mode === 'login' && styles.switchBtnActive]}
-              onPress={() => setMode('login')}
+              onPress={() => { setMode('login'); setSubmitError(''); setSubmitInfo(''); }}
             >
               <Text style={[styles.switchTxt, mode === 'login' && styles.switchTxtActive]}>
                 {T('Login', 'دخول')}
@@ -168,7 +196,7 @@ const AuthScreen = ({ navigation }) => {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.switchBtn, mode === 'signup' && styles.switchBtnActive]}
-              onPress={() => setMode('signup')}
+              onPress={() => { setMode('signup'); setSubmitError(''); setSubmitInfo(''); }}
             >
               <Text style={[styles.switchTxt, mode === 'signup' && styles.switchTxtActive]}>
                 {T('Create', 'إنشاء')}
@@ -176,7 +204,7 @@ const AuthScreen = ({ navigation }) => {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.switchBtn, mode === 'driver' && styles.switchBtnActive]}
-              onPress={() => setMode('driver')}
+              onPress={() => { setMode('driver'); setSubmitError(''); setSubmitInfo(''); }}
             >
               <Text style={[styles.switchTxt, mode === 'driver' && styles.switchTxtActive]}>
                 {T('Driver', 'سائق')}
@@ -248,15 +276,38 @@ const AuthScreen = ({ navigation }) => {
                 secureTextEntry
                 value={password}
                 onChangeText={setPassword}
+                onSubmitEditing={handleSubmit}
+                returnKeyType="go"
                 textAlign={isRTL ? 'right' : 'left'}
               />
             </>
           )}
 
+          {submitError ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>{submitError}</Text>
+            </View>
+          ) : null}
+          {submitInfo ? (
+            <View style={styles.infoBanner}>
+              <Text style={styles.infoBannerText}>{submitInfo}</Text>
+            </View>
+          ) : null}
+
+          {mode === 'login' ? (
+            <Text style={[styles.demoHint, isRTL && styles.textRight]}>
+              {T(
+                'Demo: admin@cityterminal.ae / admin123 (backend must run on your PC IP:5000)',
+                'تجريبي: admin@cityterminal.ae / admin123 (يجب تشغيل الخادم على IP:5000)'
+              )}
+            </Text>
+          ) : null}
+
           <TouchableOpacity
             style={[styles.submitButton, loading && styles.disabledBtn]}
             disabled={loading}
             onPress={handleSubmit}
+            accessibilityRole="button"
           >
             <Text style={styles.submitText}>
               {loading
@@ -297,6 +348,30 @@ const styles = StyleSheet.create({
   submitButton: { backgroundColor: theme.colors.careemGreen, borderRadius: theme.radii.button, paddingVertical: 18, marginTop: 6, alignItems: 'center' },
   disabledBtn:  { opacity: 0.6 },
   submitText:   { color: theme.colors.white, fontWeight: '900', fontSize: theme.fontSizes.md },
+  errorBanner: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  errorBannerText: { color: theme.colors.danger, fontSize: theme.fontSizes.sm, fontWeight: '700' },
+  infoBanner: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  infoBannerText: { color: '#1D4ED8', fontSize: theme.fontSizes.sm, fontWeight: '600', lineHeight: 18 },
+  demoHint: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.muted,
+    marginBottom: 8,
+    lineHeight: 16,
+  },
 });
 
 export default AuthScreen;

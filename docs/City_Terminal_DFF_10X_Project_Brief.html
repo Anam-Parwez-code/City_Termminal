@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>City Terminal — DFF 10X Project Brief</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: #111;
+      line-height: 1.55;
+      font-size: 10.5pt;
+      margin: 0;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page { page-break-after: always; padding: 0 2mm; }
+    .page:last-child { page-break-after: auto; }
+
+    /* Cover */
+    .cover {
+      min-height: 250mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: linear-gradient(165deg, #0a0a0a 0%, #1a2e1f 45%, #0d0d0d 100%);
+      color: #fff;
+      padding: 28mm 20mm 22mm;
+      border-radius: 4px;
+    }
+    .cover-badge {
+      display: inline-block;
+      background: #47D361;
+      color: #000;
+      font-weight: 700;
+      font-size: 9pt;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 6px 14px;
+      border-radius: 4px;
+    }
+    .cover-logo {
+      width: 72px; height: 72px;
+      border-radius: 18px;
+      background: #47D361;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 22pt; color: #000;
+      margin: 24px 0 16px;
+    }
+    .cover h1 {
+      font-size: 36pt;
+      font-weight: 800;
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+    .cover .ar { font-size: 18pt; opacity: 0.85; margin-bottom: 20px; }
+    .cover .subtitle { font-size: 14pt; max-width: 420px; opacity: 0.92; line-height: 1.45; }
+    .cover-meta { font-size: 9.5pt; opacity: 0.75; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 16px; }
+    .cover-meta strong { color: #47D361; }
+
+    h2 {
+      font-size: 16pt;
+      color: #0a0a0a;
+      border-left: 5px solid #47D361;
+      padding-left: 12px;
+      margin: 22px 0 12px;
+      page-break-after: avoid;
+    }
+    h3 { font-size: 11.5pt; margin: 16px 0 8px; color: #1f2937; }
+    p { margin: 0 0 10px; }
+    ul { margin: 0 0 12px; padding-left: 18px; }
+    li { margin-bottom: 5px; }
+
+    .lead {
+      font-size: 11.5pt;
+      color: #374151;
+      border-left: 3px solid #e5e7eb;
+      padding-left: 14px;
+      margin-bottom: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 16px;
+      font-size: 9.5pt;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f3f4f6; font-weight: 700; }
+    tr:nth-child(even) td { background: #fafafa; }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin: 12px 0;
+    }
+    .card {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: #fafafa;
+    }
+    .card h4 { margin: 0 0 6px; font-size: 10.5pt; color: #111; }
+    .card p { font-size: 9.5pt; margin: 0; color: #4b5563; }
+
+    .pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+    .pill {
+      background: #ecfdf3;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+      font-size: 8.5pt;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .pill.future {
+      background: #eff6ff;
+      color: #1e40af;
+      border-color: #bfdbfe;
+    }
+
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin: 12px 0;
+      font-size: 8.5pt;
+    }
+    .flow-step {
+      background: #111;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .flow-arrow { color: #47D361; font-weight: 800; }
+
+    .arch-box {
+      border: 2px solid #111;
+      border-radius: 10px;
+      padding: 14px;
+      margin: 12px 0;
+      background: #fff;
+    }
+    .arch-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .arch-item {
+      flex: 1;
+      text-align: center;
+      padding: 10px 6px;
+      background: #f3f4f6;
+      border-radius: 6px;
+      font-size: 8.5pt;
+      font-weight: 600;
+    }
+    .arch-item.highlight { background: #47D361; color: #000; }
+
+    .roadmap-item {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px dashed #e5e7eb;
+    }
+    .roadmap-num {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      background: #47D361;
+      color: #000;
+      border-radius: 50%;
+      font-weight: 800;
+      font-size: 10pt;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .roadmap-item h4 { margin: 0 0 4px; font-size: 10.5pt; }
+    .roadmap-item p { margin: 0; font-size: 9.5pt; color: #4b5563; }
+
+    .qr-journey {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin: 14px 0 18px;
+    }
+    .qr-phase {
+      border-radius: 10px;
+      padding: 14px 16px;
+      border: 2px solid #111;
+    }
+    .qr-phase.phase1 { background: #f0fdf4; border-color: #47D361; }
+    .qr-phase.phase2 { background: #eff6ff; border-color: #2563eb; }
+    .qr-phase .phase-label {
+      font-size: 8pt;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .qr-phase h4 { margin: 0 0 8px; font-size: 11pt; }
+    .qr-phase ul { margin: 0; padding-left: 16px; font-size: 9pt; }
+    .qr-phase li { margin-bottom: 4px; }
+    .qr-trigger {
+      margin-top: 10px;
+      padding: 8px 10px;
+      background: #111;
+      color: #fff;
+      border-radius: 6px;
+      font-size: 8.5pt;
+      font-weight: 700;
+      text-align: center;
+    }
+    .qr-phase.phase2 .qr-trigger { background: #2563eb; }
+
+    .footer-note {
+      margin-top: 24px;
+      padding-top: 12px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 8.5pt;
+      color: #6b7280;
+      text-align: center;
+    }
+    .toc { font-size: 10pt; }
+    .toc li { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+
+<!-- PAGE 1: COVER -->
+<div class="page">
+  <div class="cover">
+    <div>
+      <span class="cover-badge">Dubai Future Foundation · 10X Phase</span>
+      <div class="cover-logo">CT</div>
+      <h1>City Terminal</h1>
+      <div class="ar">مدينة ترمينال — Smart Off-Airport Check-In Platform</div>
+      <p class="subtitle">
+        End-to-end digital journey for passengers, drivers, and operations teams —
+        from booking verification and passport OCR to live vehicle tracking,
+        terminal handover, and boarding-ready confirmation.
+      </p>
+    </div>
+    <div class="cover-meta">
+      <strong>Project Brief</strong> · Confidential · May 2026<br />
+      Prepared for: Dubai Future Foundation (DFF) — 10X Innovation Track<br />
+      Initiative alignment: Dubai 10X · Future of mobility &amp; airport experience
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 2: EXECUTIVE SUMMARY -->
+<div class="page">
+  <h2>Executive Summary</h2>
+  <p class="lead">
+    <strong>City Terminal</strong> is a multi-surface platform built under the
+    <strong>Dubai Future Foundation (DFF) 10X phase</strong>, designed to extend the airport
+    check-in experience beyond the terminal — enabling passengers to complete identity
+    verification, schedule curb-side pickup slots, track dedicated vehicles in real time,
+    and receive a digital boarding pass–style confirmation before reaching Dubai International Airport (DXB).
+  </p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>Vision</h4>
+      <p>Reduce terminal congestion and waiting time by shifting verification and logistics to a coordinated “City Terminal” network with live operations visibility.</p>
+    </div>
+    <div class="card">
+      <h4>Delivery Status</h4>
+      <p>Working prototype across passenger mobile app, driver app, operations admin dashboard, Node.js API, PostgreSQL (Supabase), and bilingual AI chat service (JAIS + OpenAI).</p>
+    </div>
+  </div>
+
+  <h3>Key outcomes demonstrated</h3>
+  <ul>
+    <li><strong>Passenger app (React Native / Expo)</strong> — 20+ screens including a <strong>two-stage QR model</strong>: <em>Luggage / Baggage Receipt QR</em> unlocks when the driver verifies pickup; <em>Digital Boarding Pass QR</em> unlocks only after the vehicle reaches the airport terminal.</li>
+    <li><strong>Driver app</strong> — Supabase-authenticated portal: accept bookings, trip status (Accepted → Picked up → Verified → Done), real-time dispatch sync.</li>
+    <li><strong>Admin operations dashboard (React + Vite)</strong> — Live stats, dispatch map, passenger search, analytics, terminal arrival alerts with audio cue.</li>
+    <li><strong>Backend API (Express 5 + Socket.IO)</strong> — Bookings, passport scan, slots, OTP pickup proof, driver tasks, confirmation flows.</li>
+    <li><strong>AI service (FastAPI)</strong> — Bilingual chat (English / Arabic), RAG over booking data, JAIS LLM integration, passport OCR endpoint.</li>
+  </ul>
+
+  <h2>Table of Contents</h2>
+  <ol class="toc">
+    <li>Problem statement &amp; solution</li>
+    <li>System architecture</li>
+    <li>Platform modules (detailed)</li>
+    <li>Passenger journey flow</li>
+    <li>Technology stack</li>
+    <li>Implemented capabilities</li>
+    <li>AI &amp; intelligence layer</li>
+    <li>Data, security &amp; integrations</li>
+    <li>Future roadmap (10X scale-up)</li>
+    <li>API surface summary</li>
+  </ol>
+</div>
+
+<!-- PAGE 3: PROBLEM & ARCHITECTURE -->
+<div class="page">
+  <h2>Problem Statement &amp; Solution</h2>
+  <table>
+    <tr><th>Challenge</th><th>City Terminal response</th></tr>
+    <tr>
+      <td>Long queues and repeated document checks at airport</td>
+      <td>Pre-terminal passport capture with OCR + booking cross-check before travel day</td>
+    </tr>
+    <tr>
+      <td>Uncoordinated pickup from hotels / residences</td>
+      <td>Time-slot booking, AI-assisted pickup recommendation, assigned vehicle &amp; driver ID</td>
+    </tr>
+    <tr>
+      <td>No visibility for passenger or control tower</td>
+      <td>Socket.IO live location + status; admin dispatch map; passenger Live Tracking screen</td>
+    </tr>
+    <tr>
+      <td>Manual driver–passenger handover</td>
+      <td>Pickup OTP, proof QR generation, driver “Verified / Done” workflow on dedicated driver app</td>
+    </tr>
+    <tr>
+      <td>Language &amp; support barriers</td>
+      <td>Arabic / English i18n across app; JAIS-powered bilingual AI chat with booking context</td>
+    </tr>
+  </table>
+
+  <h2>System Architecture</h2>
+  <div class="arch-box">
+    <div style="text-align:center;font-weight:700;font-size:10pt;margin-bottom:4px;">City Terminal — Logical Architecture</div>
+    <div class="arch-row">
+      <div class="arch-item highlight">Passenger App<br/><small>Expo RN</small></div>
+      <div class="arch-item highlight">Driver App<br/><small>Expo RN</small></div>
+      <div class="arch-item">Admin Dashboard<br/><small>React Vite</small></div>
+    </div>
+    <div style="text-align:center;margin:8px 0;color:#47D361;font-weight:800;">▼ REST + WebSocket ▼</div>
+    <div class="arch-row">
+      <div class="arch-item highlight" style="flex:2;">Node.js API · Express 5 · Socket.IO<br/><small>Port 5000</small></div>
+      <div class="arch-item">AI Service<br/><small>FastAPI · Port 8000</small></div>
+    </div>
+    <div style="text-align:center;margin:8px 0;color:#47D361;font-weight:800;">▼</div>
+    <div class="arch-row">
+      <div class="arch-item">PostgreSQL<br/><small>Supabase</small></div>
+      <div class="arch-item">Supabase Auth<br/><small>Drivers</small></div>
+      <div class="arch-item">Tesseract OCR<br/><small>+ OpenAI Vision</small></div>
+    </div>
+  </div>
+
+  <h3>Repository structure</h3>
+  <table>
+    <tr><th>Folder</th><th>Role</th></tr>
+    <tr><td><code>mobile-app/</code></td><td>Passenger-facing Expo application</td></tr>
+    <tr><td><code>driver-app/</code></td><td>Driver login, task list, trip console</td></tr>
+    <tr><td><code>admin-dashboard/</code></td><td>Operations control tower (web)</td></tr>
+    <tr><td><code>backend/</code></td><td>Core REST API, real-time events, passport OCR</td></tr>
+    <tr><td><code>ai-service/</code></td><td>Bilingual chatbot, recommendations, OCR helper</td></tr>
+    <tr><td><code>frontend/</code></td><td>Shared UI components / marketing assets (React)</td></tr>
+  </table>
+</div>
+
+<!-- PAGE 4: MODULES -->
+<div class="page">
+  <h2>Platform Modules — Detailed</h2>
+
+  <h3>1. Passenger Mobile Application</h3>
+  <p>React Native (Expo 54) with React Navigation, i18next (EN/AR RTL), Supabase session storage, and Careem-inspired green/black design system.</p>
+  <table>
+    <tr><th>Screen / Module</th><th>Function</th></tr>
+    <tr><td>Splash &amp; Language Select</td><td>DFF-branded entry; bilingual UX from first interaction</td></tr>
+    <tr><td>Auth</td><td>Email validation &amp; passenger session</td></tr>
+    <tr><td>Booking Entry</td><td>Verify PNR/booking ID + airline against database</td></tr>
+    <tr><td>Passport Scan &amp; Verification</td><td>Camera/upload → Tesseract OCR (server) + MRZ parse → name, passport #, DOB, <strong>nationality</strong> with edit &amp; save</td></tr>
+    <tr><td>Time Slot / Slot Booking</td><td>Available slots filtered before flight departure; AI recommend slot/pickup</td></tr>
+    <tr><td>Location Pick &amp; Booking Confirm</td><td>Pickup address, vehicle assignment preview</td></tr>
+    <tr><td>Live Tracking</td><td>Real-time van map + Socket.IO; <strong>Luggage QR appears here</strong> the moment driver taps Verify (status <code>barcode_issued</code>)</td></tr>
+    <tr><td>User Profile / Barcode</td><td><strong>Baggage Receipt QR</strong> (<code>type: baggage_receipt</code>) — bag status “With driver”; same ID for luggage handover</td></tr>
+    <tr><td>Confirmation</td><td><strong>Digital Boarding Pass QR</strong> (<code>type: digital_boarding_pass</code>) — only when <code>at_airport</code> / terminal reached; bag status “At terminal”</td></tr>
+    <tr><td>Chat Support</td><td>Streaming AI assistant with booking context</td></tr>
+    <tr><td>User Profile &amp; Driver Trip (embedded)</td><td>Trip persistence; optional driver-facing flows in same codebase</td></tr>
+  </table>
+
+  <h3>2. Driver Application</h3>
+  <ul>
+    <li>Supabase email/password authentication with Driver ID metadata</li>
+    <li>Task inbox: pending bookings assigned by vehicle ID or driver ID (e.g. DR-105 / CT-vehicle)</li>
+    <li><strong>Accept booking</strong> — binds driver to trip via <code>POST /api/otp/accept-booking</code></li>
+    <li>Trip console: Accept → En route → <strong>Verified</strong> (passenger instantly receives <strong>Luggage QR</strong>) → En route to airport → <strong>Done</strong> (passenger receives <strong>Boarding Pass QR</strong>)</li>
+    <li>Socket refresh when new bookings arrive on dispatch channel</li>
+  </ul>
+
+  <h3>3. Operations Admin Dashboard</h3>
+  <ul>
+    <li>JWT-secured login (<code>/api/admin/auth</code>)</li>
+    <li>Live KPIs: today’s bookings, active vehicles, available slots</li>
+    <li>Dispatch map with normalized coordinates; “arrived at terminal” visual state</li>
+    <li>Passenger search, hourly analytics, peak-hour charts</li>
+    <li>Real-time Socket.IO: <code>location_update</code>, <code>status_update</code>, terminal sound on arrival</li>
+  </ul>
+</div>
+
+<!-- PAGE 5: BACKEND & FLOW -->
+<div class="page">
+  <h3>4. Backend API Service</h3>
+  <table>
+    <tr><th>Route group</th><th>Capabilities</th></tr>
+    <tr><td><code>/api/bookings</code></td><td>Verify booking, fetch details, update passport fields, trip status</td></tr>
+    <tr><td><code>/api/passport/scan</code></td><td>Image upload (base64) → OpenAI Vision (optional) → Tesseract fallback → MRZ normalization → booking name match</td></tr>
+    <tr><td><code>/api/slots</code></td><td>Available slots, book slot, confirm pickup OTP, proof QR, slot-by-booking</td></tr>
+    <tr><td><code>/api/otp</code></td><td>Driver tasks, accept booking, pickup verification flows</td></tr>
+    <tr><td><code>/api/confirmation</code></td><td>Airport arrival &amp; boarding confirmation state</td></tr>
+    <tr><td><code>/api/ai</code></td><td>Pickup &amp; slot recommendation proxies</td></tr>
+    <tr><td><code>/api/admin/*</code></td><td>Auth + operations stats, vehicles, passengers, analytics</td></tr>
+    <tr><td>Socket.IO</td><td>Rooms: <code>booking:{id}</code>, <code>dispatch</code> — live location &amp; status fan-out</td></tr>
+  </table>
+
+  <h3>5. AI Microservice (FastAPI)</h3>
+  <ul>
+    <li><strong>JAIS 13B</strong> (Inception / UAE bilingual model) for Arabic; OpenAI for English — auto language detect</li>
+    <li>Streaming <code>POST /chat</code> with booking-aware context from Supabase REST</li>
+    <li>Passport OCR via Tesseract (PIL pipeline) as auxiliary endpoint</li>
+    <li>System prompts position City Terminal as DFF smart airport check-in service</li>
+  </ul>
+
+  <h2>Dual QR Journey — Luggage vs Boarding Pass</h2>
+  <p class="lead" style="font-size:10pt;">
+    City Terminal deliberately separates identity documents into <strong>two QR phases</strong> so passengers always know
+    whether their bag is with the driver or already at the airport terminal — and so airport staff see the correct credential at each gate.
+  </p>
+
+  <div class="qr-journey">
+    <div class="qr-phase phase1">
+      <div class="phase-label" style="color:#065f46;">Phase 1 · After driver verification</div>
+      <h4>Luggage / Baggage Receipt QR</h4>
+      <ul>
+        <li>Triggered when driver confirms pickup (<code>vehicle_verified = true</code>, status <code>barcode_issued</code>)</li>
+        <li>Backend issues JSON payload: <code>type: baggage_receipt</code>, <code>documentType: Baggage Receipt</code></li>
+        <li>Socket.IO pushes <code>status_update</code> with <code>vehicleVerified: true</code> — no app refresh needed</li>
+        <li>Passenger sees QR on <strong>Live Tracking</strong>, <strong>My Profile</strong>, and <strong>Barcode</strong> screens</li>
+        <li>Encodes booking ID, vehicle, driver, flight, destination — bag status: <em>With driver</em></li>
+      </ul>
+      <div class="qr-trigger">Driver taps “Verified” → Passenger gets Luggage QR</div>
+    </div>
+    <div class="qr-phase phase2">
+      <div class="phase-label" style="color:#1e40af;">Phase 2 · After airport terminal reached</div>
+      <h4>Digital Boarding Pass QR</h4>
+      <ul>
+        <li>Triggered when trip status becomes <code>at_airport</code> (<code>reached_airport = true</code>)</li>
+        <li>Backend re-issues payload: <code>type: digital_boarding_pass</code>, <code>documentType: Digital Boarding Pass</code></li>
+        <li>Passenger navigates to <strong>Confirmation</strong> screen (or Home shortcut if already at airport)</li>
+        <li>Full-screen boarding-style card with scannable QR via <code>react-native-qrcode-svg</code></li>
+        <li>Same booking reference upgrades visually — bag status: <em>At terminal</em></li>
+      </ul>
+      <div class="qr-trigger">Driver marks airport arrival → Boarding Pass QR unlocks</div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th>Trigger</th><th>Who acts</th><th>Passenger sees</th><th>QR type</th></tr>
+    <tr>
+      <td>Pickup verified</td>
+      <td>Driver app — Verify / OTP confirm</td>
+      <td>Luggage QR on Live Tracking &amp; Profile</td>
+      <td><code>baggage_receipt</code></td>
+    </tr>
+    <tr>
+      <td>Terminal reached</td>
+      <td>Driver app — Done / at airport status</td>
+      <td>Boarding Pass on Confirmation screen</td>
+      <td><code>digital_boarding_pass</code></td>
+    </tr>
+  </table>
+
+  <h2>Passenger Journey Flow</h2>
+  <div class="flow">
+    <span class="flow-step">Language</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Auth</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Booking Verify</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Passport OCR</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Verify Data</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Book Slot</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Pickup Location</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Confirm</span><span class="flow-arrow">→</span>
+    <span class="flow-step">Live Track</span><span class="flow-arrow">→</span>
+    <span class="flow-step" style="background:#065f46;">Luggage QR</span><span class="flow-arrow">→</span>
+    <span class="flow-step">To Airport</span><span class="flow-arrow">→</span>
+    <span class="flow-step" style="background:#2563eb;">Boarding QR</span>
+  </div>
+  <p style="font-size:9pt;color:#6b7280;">
+    Trip state is persisted locally (<code>passengerTripStorage</code>) so Home navigation resumes Live Tracking or Confirmation appropriately after app restart.
+  </p>
+
+  <h2>Technology Stack</h2>
+  <table>
+    <tr><th>Layer</th><th>Technologies</th></tr>
+    <tr><td>Mobile</td><td>React Native 0.81, Expo 54, React Navigation 7, i18next, expo-camera, react-native-maps, Socket.IO client, tesseract.js (web fallback)</td></tr>
+    <tr><td>Driver</td><td>Expo, Supabase JS SDK, AsyncStorage session</td></tr>
+    <tr><td>Admin Web</td><td>React 19, Vite 7, React Router 7, Socket.IO client</td></tr>
+    <tr><td>API</td><td>Node.js, Express 5, Socket.IO 4, pg (PostgreSQL), JWT, tesseract.js, OpenAI SDK</td></tr>
+    <tr><td>AI</td><td>Python FastAPI, LangChain RAG patterns, JAIS via API, OpenAI GPT-4o-mini, pytesseract</td></tr>
+    <tr><td>Data</td><td>PostgreSQL on Supabase — bookings, slots, slot_bookings, drivers, vehicle_tracking</td></tr>
+  </table>
+</div>
+
+<!-- PAGE 6: IMPLEMENTED + AI -->
+<div class="page">
+  <h2>Implemented Capabilities (Current Build)</h2>
+  <div class="pill-row">
+    <span class="pill">Tesseract OCR</span>
+    <span class="pill">MRZ parsing</span>
+    <span class="pill">Nationality display</span>
+    <span class="pill">Real-time tracking</span>
+    <span class="pill">Pickup OTP</span>
+    <span class="pill">Proof QR</span>
+    <span class="pill">Bilingual UI</span>
+    <span class="pill">JAIS chatbot</span>
+    <span class="pill">Admin dispatch</span>
+    <span class="pill">Driver accept flow</span>
+    <span class="pill">Slot capacity</span>
+    <span class="pill">Flight-time filter</span>
+  </div>
+
+  <h3>Passport &amp; identity (current)</h3>
+  <ul>
+    <li>Server-side <strong>Tesseract OCR</strong> with optional <strong>OpenAI Vision</strong> enrichment (<code>PASSPORT_SCAN_METHOD=auto</code>)</li>
+    <li>Extracts: full name, passport number, date of birth, nationality, expiry, gender, confidence score</li>
+    <li>Cross-validation against booking record in PostgreSQL</li>
+    <li>Passenger can correct fields on Verification screen; persisted via <code>PUT /api/bookings/:id/passport</code></li>
+    <li>Web client fallback: device-side <code>tesseract.js</code> when API unreachable</li>
+  </ul>
+
+  <h3>Operations &amp; logistics (current)</h3>
+  <ul>
+    <li>Slot inventory with capacity and booking counts; demo fallback if DB empty</li>
+    <li>Vehicle assignment, driver name, pickup OTP stored on <code>slot_bookings</code></li>
+    <li>Driver task API lists pending / active trips per driver or vehicle ID</li>
+    <li><strong>Dual QR gate:</strong> Luggage QR only after driver verify; Boarding Pass QR only after airport terminal — enforced in API (<code>buildBarcodePayload</code>) and UI (<code>vehicleVerified</code> / <code>isBoardingPass</code> checks)</li>
+  </ul>
+
+  <h2>AI &amp; Intelligence Layer</h2>
+  <table>
+    <tr><th>Feature</th><th>Implementation</th></tr>
+    <tr><td>Conversational support</td><td>Streaming chat; language auto-detect; booking-aware answers (QR, vehicle, ETA, flight)</td></tr>
+    <tr><td>Pickup recommendation</td><td><code>POST /api/ai/recommend-pickup</code> — factors location, traffic patterns (extensible)</td></tr>
+    <tr><td>Slot recommendation</td><td><code>POST /api/ai/recommend-slot</code> — aligns slot with flight departure window</td></tr>
+    <tr><td>Document OCR</td><td>Dual pipeline: cloud vision + on-prem Tesseract for resilience</td></tr>
+  </table>
+</div>
+
+<!-- PAGE 7: FUTURE ROADMAP -->
+<div class="page">
+  <h2>Future Roadmap — 10X Scale-Up</h2>
+  <p class="lead">
+    The current prototype establishes the full journey skeleton. The following integrations are
+    planned for production alignment with UAE government digital services and airline operations.
+  </p>
+
+  <div class="roadmap-item">
+    <div class="roadmap-num">1</div>
+    <div>
+      <h4>UAE Passport Verification API (ICP / Official Channels)</h4>
+      <p>
+        Replace and augment OCR-only verification with <strong>authoritative identity validation</strong>
+        through the UAE federal digital identity ecosystem (e.g. ICP Emirates ID / passport validation services).
+        Flow: capture MRZ → submit tokenized request → receive verified status, nationality, and document authenticity
+        without storing raw biometrics on device. Reduces fraud and manual correction on Verification screen.
+      </p>
+    </div>
+  </div>
+
+  <div class="roadmap-item">
+    <div class="roadmap-num">2</div>
+    <div>
+      <h4>Smart Luggage — Overweight Detection via Camera</h4>
+      <p>
+        Passenger photographs checked bag before pickup. <strong>Computer vision model</strong> estimates
+        dimensions/volume class and flags likely <strong>overweight or oversized</strong> items against airline allowance rules
+        (weight tiers per airline_code in booking). Early warning: “Estimated 24 kg — Emirates allowance 23 kg” with
+        option to repack or pay excess before vehicle dispatch. Reduces surprises at curb and airport belt.
+      </p>
+    </div>
+  </div>
+
+  <div class="roadmap-item">
+    <div class="roadmap-num">3</div>
+    <div>
+      <h4>Flight Delay &amp; Disruption Notifications</h4>
+      <p>
+        Integrate <strong>flight status feeds</strong> (airline APIs / OAG-style data). On delay or gate change:
+        push notification + in-app banner; auto-suggest <strong>rescheduled pickup slot</strong>; notify assigned driver
+        and operations dashboard. Socket event <code>flight_update</code> propagates to passenger Live Tracking and dispatch map.
+      </p>
+    </div>
+  </div>
+
+  <div class="roadmap-item">
+    <div class="roadmap-num">4</div>
+    <div>
+      <h4>DXB &amp; Airline System Integration</h4>
+      <p>Boarding pass sync, bag tag pre-registration, and terminal-specific routing (T1/T2/T3) based on airline master data.</p>
+    </div>
+  </div>
+
+  <div class="roadmap-item">
+    <div class="roadmap-num">5</div>
+    <div>
+      <h4>Predictive Dispatch &amp; Fleet Optimization</h4>
+      <p>ML on historical slot_bookings + traffic: dynamic vehicle allocation, ETA confidence intervals, SLA dashboards for DFF operations.</p>
+    </div>
+  </div>
+
+  <div class="pill-row">
+    <span class="pill future">UAE Passport API</span>
+    <span class="pill future">Luggage CV</span>
+    <span class="pill future">Push notifications</span>
+    <span class="pill future">Flight status API</span>
+    <span class="pill future">Apple / Google Wallet pass</span>
+    <span class="pill future">ePayments for excess baggage</span>
+  </div>
+</div>
+
+<!-- PAGE 8: SECURITY & API -->
+<div class="page">
+  <h2>Data, Security &amp; Compliance Considerations</h2>
+  <ul>
+    <li>Passport images transmitted as base64 over HTTPS; server-side processing only — no dummy data in production path</li>
+    <li>Admin routes protected by JWT middleware; role-based UI (Admin / Manager)</li>
+    <li>Driver authentication via Supabase with session isolation per device</li>
+    <li>PII minimization roadmap: tokenized passport references post-UAE API integration</li>
+    <li>Audit trail: booking status transitions, slot_bookings timestamps, vehicle_tracking coordinates</li>
+    <li>Alignment with UAE data residency requirements for production deployment on approved cloud regions</li>
+  </ul>
+
+  <h2>API Surface Summary</h2>
+  <table>
+    <tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr>
+    <tr><td>POST</td><td>/api/bookings/verify</td><td>Validate booking ID + airline</td></tr>
+    <tr><td>PUT</td><td>/api/bookings/:id/passport</td><td>Save verified passport fields</td></tr>
+    <tr><td>POST</td><td>/api/passport/scan</td><td>OCR + extract + optional booking match</td></tr>
+    <tr><td>GET</td><td>/api/slots/available</td><td>List bookable pickup windows</td></tr>
+    <tr><td>POST</td><td>/api/slots/book</td><td>Reserve slot + assign vehicle</td></tr>
+    <tr><td>POST</td><td>/api/slots/confirm-pickup</td><td>OTP verify + proof QR</td></tr>
+    <tr><td>GET</td><td>/api/otp/driver-tasks/:driverId</td><td>Driver pending/active tasks</td></tr>
+    <tr><td>POST</td><td>/api/otp/accept-booking</td><td>Driver accepts trip</td></tr>
+    <tr><td>GET</td><td>/api/admin/operations/*</td><td>Stats, vehicles, passengers, analytics</td></tr>
+    <tr><td>WS</td><td>Socket.IO</td><td>location_update, status_update, join_booking, join_dispatch</td></tr>
+    <tr><td>POST</td><td>AI /chat (port 8000)</td><td>Streaming bilingual assistant</td></tr>
+  </table>
+
+  <h2>Demo &amp; Deployment Readiness</h2>
+  <table>
+    <tr><th>Component</th><th>Run command</th><th>Port</th></tr>
+    <tr><td>Backend API</td><td><code>cd backend && node server.js</code></td><td>5000</td></tr>
+    <tr><td>AI service</td><td><code>cd ai-service && uvicorn main:app</code></td><td>8000</td></tr>
+    <tr><td>Admin dashboard</td><td><code>cd admin-dashboard && npm run dev</code></td><td>5173</td></tr>
+    <tr><td>Passenger app</td><td><code>cd mobile-app && npx expo start</code></td><td>Expo</td></tr>
+    <tr><td>Driver app</td><td><code>cd driver-app && npx expo start</code></td><td>Expo</td></tr>
+  </table>
+
+  <h2>Closing — Request for DFF Review</h2>
+  <p>
+    City Terminal demonstrates a <strong>complete vertical slice</strong> of Dubai’s 10X ambition:
+    proactive government-grade services, AI-first citizen experience, and real-time operations —
+    not a mock-up, but a working multi-app ecosystem ready for pilot hardening and official API partnerships.
+  </p>
+  <p>
+    We welcome a technical walkthrough, UX review, and alignment session on prioritising
+    <strong>UAE Passport Verification API</strong>, <strong>luggage vision checks</strong>, and
+    <strong>flight disruption notifications</strong> for the next 10X milestone.
+  </p>
+
+  <div class="footer-note">
+    City Terminal · Dubai Future Foundation · 10X Phase · Project Brief · May 2026<br />
+    This document describes the implemented prototype and planned production integrations.
+  </div>
+</div>
+
+</body>
+</html>

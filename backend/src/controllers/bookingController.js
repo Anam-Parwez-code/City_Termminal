@@ -1,5 +1,88 @@
 const pool = require('../config/db');
 
+const DEMO_BOOKINGS = {
+  EK123456: {
+    booking_id: 'EK123456',
+    passenger_name: 'Aisha Khan',
+    flight_number: 'EK202',
+    departure_time: '2026-06-01T14:30:00',
+    destination: 'London (LHR)',
+    airline_code: 'EK',
+    seat_number: '12A',
+    terminal: 'Terminal 3',
+    passport_number: null,
+    date_of_birth: null,
+    nationality: null,
+    booking_status: 'confirmed',
+    vehicle_id: null,
+    driver_name: null,
+    driver_phone: null,
+    vehicle_status: 'scheduled',
+    vehicle_verified: false,
+    barcode_data: null,
+  },
+  QR789012: {
+    booking_id: 'QR789012',
+    passenger_name: 'Omar Hassan',
+    flight_number: 'QR815',
+    departure_time: '2026-06-01T18:00:00',
+    destination: 'Doha (DOH)',
+    airline_code: 'QR',
+    seat_number: '8C',
+    terminal: 'Terminal 1',
+    booking_status: 'confirmed',
+    vehicle_status: 'scheduled',
+    vehicle_verified: false,
+    barcode_data: null,
+  },
+};
+
+const rowToBookingResponse = (row) => {
+  const vehicleVerified =
+    row.vehicle_verified === true ||
+    ['at_airport', 'barcode_issued', 'en_route_airport'].includes(
+      String(row.vehicle_status || '').toLowerCase()
+    );
+
+  return {
+    success: true,
+    valid: true,
+    demoMode: Boolean(row.demoMode),
+    bookingData: {
+      booking_id: row.booking_id,
+      passenger_name: row.passenger_name || 'Passenger',
+      flight_number: row.flight_number || 'N/A',
+      departure_time: row.departure_time || null,
+      destination: row.destination || '-',
+      airline_code: row.airline_code || '-',
+      seat_number: row.seat_number || 'N/A',
+      terminal: row.terminal || 'Terminal 3',
+      passport_number: row.passport_number || null,
+      date_of_birth: row.date_of_birth || null,
+      nationality: row.nationality || null,
+      vehicle_id: row.vehicle_id || null,
+      driver_name: row.driver_name || null,
+      driver_phone: row.driver_phone || null,
+      status: row.vehicle_status || row.booking_status || 'Scheduled',
+      vehicle_verified: vehicleVerified,
+      barcode_data: vehicleVerified ? (row.barcode_data || row.booking_id) : null,
+    },
+  };
+};
+
+const verifyDemoBooking = (bookingId, airlineCode) => {
+  const id = String(bookingId || '').trim().toUpperCase();
+  const row = DEMO_BOOKINGS[id];
+  if (!row) return null;
+  if (
+    airlineCode &&
+    String(row.airline_code).toUpperCase() !== String(airlineCode).trim().toUpperCase()
+  ) {
+    return null;
+  }
+  return rowToBookingResponse({ ...row, demoMode: true });
+};
+
 // ── 1. VERIFY & FETCH BOOKING (Main API for Profile Sync) ───────────────────
 const verifyBooking = async (req, res) => {
   try {
@@ -7,6 +90,16 @@ const verifyBooking = async (req, res) => {
 
     if (!bookingId) {
       return res.status(400).json({ success: false, message: 'Booking ID is required' });
+    }
+
+    if (pool.isDbReachable && !pool.isDbReachable()) {
+      const demo = verifyDemoBooking(bookingId, airlineCode);
+      if (demo) return res.status(200).json(demo);
+      return res.status(404).json({
+        success: false,
+        valid: false,
+        message: 'Booking not found (demo: try EK123456 + Emirates).',
+      });
     }
 
     // Dynamic Query: Airline code ho toh check kare, nahi toh sirf Booking ID se nikale
@@ -48,41 +141,17 @@ const verifyBooking = async (req, res) => {
     }
 
     const row = result.rows[0];
-    const vehicleVerified =
-      row.vehicle_verified === true ||
-      ['at_airport', 'barcode_issued', 'en_route_airport'].includes(String(row.vehicle_status || '').toLowerCase());
-
-    // Uniform Response for Frontend State
-    return res.status(200).json({
-      success: true,
-      valid: true,
-      bookingData: {
-        booking_id: row.booking_id,
-        passenger_name: row.passenger_name || 'Passenger',
-        flight_number: row.flight_number || 'N/A',
-        departure_time: row.departure_time || null,
-        destination: row.destination || '-',
-        airline_code: row.airline_code || '-',
-        seat_number: row.seat_number || 'N/A',
-        terminal: row.terminal || 'Terminal 3',
-        passport_number: row.passport_number || null,
-        date_of_birth: row.date_of_birth || null,
-        nationality: row.nationality || null,
-        
-        // 🚖 Slot / Vehicle Assignment Fields
-        vehicle_id: row.vehicle_id || null,
-        driver_name: row.driver_name || null,
-        driver_phone: row.driver_phone || null,
-        status: row.vehicle_status || row.booking_status || 'Scheduled', 
-        
-        // 🔒 Barcode Lock/Unlock Flags
-        vehicle_verified: vehicleVerified,
-        barcode_data: vehicleVerified ? (row.barcode_data || row.booking_id) : null
-      },
-    });
+    return res.status(200).json(rowToBookingResponse(row));
   } catch (error) {
-    console.error('Verify booking error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Verify booking error:', error.message);
+    const demo = verifyDemoBooking(req.body?.bookingId, req.body?.airlineCode);
+    if (demo) return res.status(200).json(demo);
+    return res.status(500).json({
+      success: false,
+      message: error.code === 'DB_OFFLINE'
+        ? 'Database offline — use demo booking EK123456'
+        : 'Server error',
+    });
   }
 };
 

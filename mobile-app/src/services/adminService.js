@@ -1,9 +1,11 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { API_BASE_URL } from '../config/apiConfig';
 
-const BASE_URL = 'http://192.168.81.224:5000/api';
+const BASE_URL = API_BASE_URL;
 const TOKEN_KEY = 'city_terminal_admin_token';
+const PASSENGER_SESSION_KEY = 'city_terminal_passenger_session';
 const CURRENT_BOOKING_KEY = 'city_terminal_current_booking_id';
 
 const storage = {
@@ -29,7 +31,7 @@ const storage = {
 
 const adminApi = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,
+  timeout: 8000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -83,6 +85,27 @@ const adminService = {
   async isAuthenticated() {
     const token = await storage.getItem(TOKEN_KEY);
     return Boolean(token);
+  },
+
+  async savePassengerSession({ email, name }) {
+    await storage.setItem(
+      PASSENGER_SESSION_KEY,
+      JSON.stringify({
+        email: String(email || '').trim(),
+        name: String(name || email || '').trim(),
+        savedAt: new Date().toISOString(),
+      }),
+    );
+  },
+
+  async getPassengerSession() {
+    const raw = await storage.getItem(PASSENGER_SESSION_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   },
 
   async fetchStats() {

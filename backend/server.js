@@ -89,7 +89,21 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, message: err.message });
 });
 
+const db = require('./src/config/db');
+
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`✅ City Terminal Backend running on port ${PORT}`);
-});
+
+(async () => {
+  const ok = await db.testConnection();
+  server.listen(PORT, () => {
+    console.log(`✅ City Terminal Backend running on port ${PORT}`);
+    if (ok) {
+      console.log('✅ Database connected (Supabase/Postgres)');
+    } else {
+      const hint = db.getLastDbError()?.message || 'Not configured';
+      console.warn('⚠️  Database offline —', hint);
+      console.warn('   Admin login still works: admin@cityterminal.ae / admin123');
+      console.warn('   Fix: backend/.env → DATABASE_URL from Supabase (see .env.example)');
+    }
+  });
+})();

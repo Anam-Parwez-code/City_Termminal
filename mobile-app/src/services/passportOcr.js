@@ -65,7 +65,7 @@ export const formatNationality = (value) => {
   return titleCase(raw);
 };
 
-const normalizePassportResult = (data = {}, method = 'ocr') => ({
+export const normalizePassportResult = (data = {}, method = 'ocr') => ({
   name: data.name || null,
   passportNumber: data.passportNumber || data.passport_number || null,
   dateOfBirth: data.dateOfBirth || data.date_of_birth || data.dob || null,
@@ -73,8 +73,9 @@ const normalizePassportResult = (data = {}, method = 'ocr') => ({
   nationalityCode: data.nationalityCode || null,
   expiryDate: data.expiryDate || data.expiry_date || null,
   gender: data.gender || null,
-  confidence: Number(data.confidence ?? 0.7),
+  confidence: Number(data.confidence ?? 0.55),
   mode: method,
+  needsReview: Boolean(data.needsReview),
 });
 
 const repairMrzLine = (line) =>
@@ -103,31 +104,50 @@ const mrzDate = (value, type = 'birth') => {
   return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
 };
 
-const parseMRZ = (rawText) => {
+const parseVisualDate = (text) => {
+  const upper = String(text || '').toUpperCase();
+  const monthMap = {
+    JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+    JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12',
+  };
+  let m = upper.match(/\b(\d{1,2})[\s./-]*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*[\s./-]*(\d{2,4})\b/);
+  if (m) {
+    const yyyy = m[3].length === 4 ? Number(m[3]) : (Number(m[3]) <= 30 ? 2000 + Number(m[3]) : 1900 + Number(m[3]));
+    return `${yyyy}-${monthMap[m[2]]}-${String(m[1]).padStart(2, '0')}`;
+  }
+  m = upper.match(/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+  m = upper.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/);
+  if (m) {
+    const yyyy = m[3].length === 4 ? Number(m[3]) : (Number(m[3]) <= 30 ? 2000 + Number(m[3]) : 1900 + Number(m[3]));
+    return `${yyyy}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+  }
+  return null;
+};
+
+export const parseMRZ = (rawText) => {
   const lines = String(rawText || '')
     .split(/\r?\n/)
     .map(repairMrzLine)
-    .filter((line) => line.length >= 28 && line.includes('<'));
+    .filter((line) => line.length >= 20 && line.includes('<'));
 
-  let line1 = null;
-  let line2 = null;
+  const candidates = [];
   for (let i = 0; i < lines.length - 1; i += 1) {
     const first = lines[i];
     const second = lines[i + 1];
-    const looksLikeNameLine = first.includes('<<') && /[A-Z]{3,}/.test(first.replace(/</g, ''));
-    const looksLikeDataLine = /^[A-Z0-9<]{6,}/.test(second) && /\d{6}/.test(second);
-    if (
-      ((first.startsWith('P<') || first.startsWith('P')) || looksLikeNameLine) &&
-      second.length >= 28 &&
-      looksLikeDataLine
-    ) {
-      line1 = (first.startsWith('P') ? first : `P<${first}`).padEnd(44, '<').slice(0, 44);
-      line2 = second.padEnd(44, '<').slice(0, 44);
+    const looksLikeNameLine =
+      first.includes('<<') || (first.startsWith('P') && first.length >= 20);
+    const looksLikeDataLine = /\d{6}/.test(second) && /[A-Z0-9<]{8,}/.test(second);
+    if (looksLikeNameLine && second.length >= 20 && looksLikeDataLine) {
+      const line1 = (first.startsWith('P') ? first : `P<XXX${first}`).padEnd(44, '<').slice(0, 44);
+      const line2 = second.padEnd(44, '<').slice(0, 44);
+      candidates.push([line1, line2]);
     }
   }
 
-  if (!line1 || !line2) return null;
+  if (candidates.length === 0) return null;
 
+  const [line1, line2] = candidates[candidates.length - 1];
   const namePart = line1.slice(5);
   const [surnameRaw = '', givenRaw = ''] = namePart.split('<<');
   const surname = surnameRaw.replace(/</g, ' ').replace(/\s+/g, ' ').trim();
@@ -153,18 +173,24 @@ const parseVisualFallback = (rawText) => {
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-  const passportMatch = upper.match(/\b[A-Z]{1,2}[0-9]{6,8}\b/) || upper.match(/\b[0-9]{8,9}\b/);
+  const passportMatch =
+    upper.match(/\b[A-Z][0-9]{7,8}\b/) ||
+    upper.match(/\b[A-Z]{2}[0-9]{6,7}\b/) ||
+    upper.match(/\b[0-9]{8,9}\b/);
   const natWord = upper.match(
-    /\b(INDIAN|PAKISTANI|EMIRATI|BRITISH|AMERICAN|FILIPINO|NEPALI|BANGLADESHI|SRI LANKAN|EGYPTIAN|SAUDI|JORDANIAN)\b/,
+    /\b(INDIAN|PAKISTANI|EMIRATI|BRITISH|AMERICAN|FILIPINO|NEPALI|BANGLADESHI|SRI LANKAN|EGYPTIAN|SAUDI|JORDANIAN|IND|PAK|UAE|USA|GBR)\b/,
   );
+  const dob = parseVisualDate(upper);
 
   let guessedName = null;
   for (const line of lines) {
     const normalized = line.replace(/[^A-Za-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (normalized.length < 5 || normalized.length > 45) continue;
-    if (/passport|nationality|date|birth|expiry|authority|surname|given/i.test(normalized)) continue;
-    const words = normalized.split(' ');
-    if (words.length >= 2 && words.every((w) => w.length > 1)) {
+    if (normalized.length < 4 || normalized.length > 50) continue;
+    if (/passport|nationality|date|birth|expiry|authority|surname|given|republic|sex|place|country/i.test(normalized)) {
+      continue;
+    }
+    const words = normalized.split(' ').filter((w) => w.length > 1);
+    if (words.length >= 2) {
       guessedName = titleCase(normalized);
       break;
     }
@@ -174,21 +200,47 @@ const parseVisualFallback = (rawText) => {
     name: guessedName,
     passportNumber: passportMatch ? passportMatch[0] : null,
     nationality: natWord ? titleCase(natWord[0]) : null,
+    dateOfBirth: dob,
     confidence: 0.5,
   };
 };
 
-const hasRequiredFields = (data) =>
-  Boolean(data?.name && data?.passportNumber && data?.dateOfBirth && data?.nationality);
+export const mergeOcrResults = (...parts) => {
+  const merged = {};
+  for (const part of parts) {
+    if (!part) continue;
+    Object.entries(part).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && String(value).trim() !== '') {
+        merged[key] = value;
+      }
+    });
+  }
+  if (!merged.nationality && merged.nationalityCode) {
+    merged.nationality = merged.nationalityCode;
+  }
+  return merged;
+};
+
+export const fieldCount = (data) =>
+  ['name', 'passportNumber', 'dateOfBirth', 'nationality'].filter((k) => {
+    const v = k === 'nationality' ? formatNationality(data?.[k]) || data?.[k] : data?.[k];
+    return v && String(v).trim();
+  }).length;
+
+/** Enough to open Verification and let user fix missing fields */
+export const hasMinimumPassportData = (data) =>
+  Boolean(data?.passportNumber && String(data.passportNumber).trim().length >= 6) &&
+  Boolean((data?.name && String(data.name).trim()) || (data?.dateOfBirth && String(data.dateOfBirth).trim()));
+
+export const hasFullPassportData = (data) => fieldCount(data) >= 4;
 
 const scanWithDeviceTesseract = async (imageBase64) => {
-  const { createWorker } = await import('tesseract.js');
-  const worker = await createWorker('eng', 1, {
-    logger: () => {},
-  });
+  const { createWorker, PSM } = await import('tesseract.js');
+  const worker = await createWorker('eng', 1, { logger: () => {} });
   try {
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789< -/.,',
+      tessedit_pageseg_mode: PSM?.AUTO || '3',
     });
     const dataUrl = imageBase64.startsWith('data:')
       ? imageBase64
@@ -197,59 +249,72 @@ const scanWithDeviceTesseract = async (imageBase64) => {
     const rawText = data?.text || '';
     const mrz = parseMRZ(rawText);
     const visual = parseVisualFallback(rawText);
-    const merged = {
-      ...visual,
-      ...Object.fromEntries(Object.entries(mrz || {}).filter(([, v]) => v)),
-    };
-    if (!merged.nationality && merged.nationalityCode) {
-      merged.nationality = merged.nationalityCode;
-    }
+    const merged = mergeOcrResults(visual, mrz);
     return normalizePassportResult(merged, 'device-tesseract');
   } finally {
     await worker.terminate();
   }
 };
 
-/** Scan passport: backend Tesseract first, device Tesseract on web if backend unavailable */
+const extractFromBackendPayload = (payload, method) => {
+  const raw = payload?.data || payload;
+  return normalizePassportResult(raw, method || payload?.method || 'backend-tesseract');
+};
+
+/** Scan passport: backend OCR → device OCR (web) → merged best result */
 export async function scanPassportFromImage({ imageBase64, bookingId }) {
   if (!imageBase64) {
     throw new Error('Passport image is missing.');
   }
 
+  let backendResult = null;
+  let backendError = null;
+
   try {
     const result = await apiService.verifyPassport({ imageBase64, bookingId });
     if (result?.success && result?.data) {
-      const normalized = normalizePassportResult(result.data, result.method || 'backend-tesseract');
-      if (!hasRequiredFields(normalized)) {
-        const err = new Error(
-          'Passport details not found clearly. Ensure name, number, date of birth and nationality are visible.',
-        );
-        err.partialData = normalized;
-        throw err;
-      }
-      return normalized;
+      backendResult = extractFromBackendPayload(result, result.method);
+    } else if (result?.data) {
+      backendResult = extractFromBackendPayload(result, result.method);
     }
-    throw new Error(result?.message || 'Passport scan failed.');
-  } catch (backendErr) {
-    if (Platform.OS === 'web') {
-      try {
-        const local = await scanWithDeviceTesseract(imageBase64);
-        if (hasRequiredFields(local)) return local;
-        throw new Error(
-          'Could not read passport clearly. Use a flat, well-lit photo with the MRZ lines at the bottom visible.',
-        );
-      } catch (localErr) {
-        throw localErr;
-      }
+  } catch (err) {
+    backendError = err;
+    if (err?.payload?.data) {
+      backendResult = extractFromBackendPayload(
+        { data: err.payload.data, method: err.payload.method },
+        err.payload.method,
+      );
     }
-    const msg =
-      backendErr?.payload?.message ||
-      backendErr?.message ||
-      'Passport scan failed. Check backend is running and try again.';
-    const err = new Error(msg);
-    if (backendErr?.payload?.data) {
-      err.partialData = normalizePassportResult(backendErr.payload.data);
-    }
-    throw err;
   }
+
+  let deviceResult = null;
+  if (Platform.OS === 'web') {
+    try {
+      deviceResult = await scanWithDeviceTesseract(imageBase64);
+    } catch (deviceErr) {
+      console.warn('Device OCR failed:', deviceErr?.message);
+    }
+  }
+
+  const merged = normalizePassportResult(
+    mergeOcrResults(backendResult, deviceResult),
+    deviceResult ? 'merged-ocr' : backendResult?.mode || 'backend-tesseract',
+  );
+
+  if (hasMinimumPassportData(merged)) {
+    merged.needsReview = !hasFullPassportData(merged);
+    return merged;
+  }
+
+  if (backendResult && hasMinimumPassportData(backendResult)) {
+    return normalizePassportResult({ ...backendResult, needsReview: true }, backendResult.mode);
+  }
+
+  const msg =
+    backendError?.payload?.message ||
+    backendError?.message ||
+    'Could not read passport. Use a flat photo with MRZ lines at the bottom visible.';
+  const err = new Error(msg);
+  err.partialData = merged;
+  throw err;
 }
