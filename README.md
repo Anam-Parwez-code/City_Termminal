@@ -52,4 +52,4 @@ Future-proofing Mobility: Replacing manual terminal checks with automated AI-dri
 Enhancing Safety: Utilizing secure barcode infrastructure for passenger and cargo verification.
 
 Scalability: Built on a decoupled microservices-like structure capable of handling city-scale operations seamlessly.
-<img width="720" height="1600" alt="WhatsApp Image 2026-06-01 at 11 51 57 PM" src="https://github.com/user-attachments/assets/c4384f2f-3d08-4368-8e31-500aa8677718" />
+<img width="620" height="900" alt="WhatsApp Image 2026-06-01 at 11 51 57 PM" src="https://github.com/user-attachments/assets/c4384f2f-3d08-4368-8e31-500aa8677718" />
